@@ -1,4 +1,4 @@
-"""
+﻿"""
 Compat runner that uses the new azure_ocr module to process PDFs.
 First-page only OCR, saves raw JSON and first-page text.
 """
@@ -20,7 +20,7 @@ def process_pdf(path: Path):
 
 def main():
     # Default sample: process everything in ~/Downloads/ny-probate if present
-    dl_dir = Path("/Users/matthewmakh/Downloads/ny-probate")
+    dl_dir = Path.home() / "Downloads" / "ny-probate"
     if dl_dir.exists():
         pdfs = sorted(dl_dir.glob("*.pdf"))
     else:

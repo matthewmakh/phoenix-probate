@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import io
 import json
 import os
@@ -518,11 +518,11 @@ def _normalize_phone_chars(s: str) -> str:
 		return s
 	subs = {
 		'O': '0', 'o': '0', 'Q': '0',
-		'I': '1', 'l': '1', '¡': '1', '|': '1',
+		'I': '1', 'l': '1', 'Â¡': '1', '|': '1',
 		'S': '5', 's': '5',
 		'B': '8',
 		'Z': '2',
-		'—': '-', '–': '-', '−': '-', '—': '-',
+		'â€”': '-', 'â€“': '-', 'âˆ’': '-', 'â€”': '-',
 	}
 	out = ''.join(subs.get(ch, ch) for ch in s)
 	# Remove weird spaces
@@ -618,7 +618,7 @@ def extract_pdf_data(pdf_path: str, force_ocr: bool = False, max_pages: Optional
 def _main():
 	parser = argparse.ArgumentParser(description="Extract key fields from NY probate PDFs (with OCR fallback)")
 	# Default directory if nothing is provided
-	DEFAULT_DIR = "/Users/matthewmakh/Downloads/ny-probate"
+        DEFAULT_DIR = os.path.join(os.path.expanduser("~"), "Downloads", "ny-probate")
 	group = parser.add_mutually_exclusive_group(required=False)
 	group.add_argument("pdf", nargs="?", help="Path to a single PDF file")
 	group.add_argument("--dir", dest="dir", help=f"Directory containing PDF files to process (default: {DEFAULT_DIR})")
