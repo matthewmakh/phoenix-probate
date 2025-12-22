@@ -1,0 +1,13 @@
+# Process everything in ocr_text/
+python batch_llm_backfill.py
+
+# Process a subset by glob
+python batch_llm_backfill.py --pattern "2025-3*_Voluntary_Admin_Affidavit.txt"
+
+# Re-run over existing files and overwrite
+python batch_llm_backfill.py --overwrite
+
+# Control output directory
+python batch_llm_backfill.py --output-dir ./structured_json
+
+python batch_llm_backfill.py --pattern 2025-3729_Voluntary_Admin_Affidavit.txt --limit 1
