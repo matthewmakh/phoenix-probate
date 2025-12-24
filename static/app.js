@@ -47,6 +47,7 @@ function toggleTheme() {
 // Data Loading
 async function loadRecords() {
     showLoading(true);
+    showSkeletonStats(true);
     
     try {
         const response = await fetch('/api/records');
@@ -61,7 +62,34 @@ async function loadRecords() {
         console.error('Error:', error);
     } finally {
         showLoading(false);
+        showSkeletonStats(false);
     }
+}
+
+// Show skeleton loading state for stats
+function showSkeletonStats(show) {
+    const statElements = ['#statTotal', '#statNew', '#statContacted', '#statFollowUp'];
+    const badgeElements = ['#totalBadge', '#newBadge', '#contactedBadge', '#followUpBadge'];
+    
+    statElements.forEach(sel => {
+        const el = $(sel);
+        if (show) {
+            el.textContent = '...';
+            el.classList.add('skeleton');
+        } else {
+            el.classList.remove('skeleton');
+        }
+    });
+    
+    badgeElements.forEach(sel => {
+        const el = $(sel);
+        if (show) {
+            el.textContent = '...';
+            el.classList.add('skeleton');
+        } else {
+            el.classList.remove('skeleton');
+        }
+    });
 }
 
 function populateCountyFilter() {
@@ -89,15 +117,44 @@ function updateStats() {
         if (r.follow_up_date && r.follow_up_date <= today) stats.followUp++;
     });
     
-    $('#statTotal').textContent = stats.total;
-    $('#statNew').textContent = stats.new;
-    $('#statContacted').textContent = stats.contacted;
-    $('#statFollowUp').textContent = stats.followUp;
+    animateNumber('#statTotal', stats.total);
+    animateNumber('#statNew', stats.new);
+    animateNumber('#statContacted', stats.contacted);
+    animateNumber('#statFollowUp', stats.followUp);
     
     $('#totalBadge').textContent = stats.total;
     $('#newBadge').textContent = stats.new;
     $('#contactedBadge').textContent = stats.contacted;
     $('#followUpBadge').textContent = stats.followUp;
+}
+
+// Animate number counting up
+function animateNumber(selector, target) {
+    const el = $(selector);
+    const duration = 500;
+    const start = parseInt(el.textContent) || 0;
+    const startTime = performance.now();
+    
+    el.classList.add('counting');
+    
+    function update(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Ease out cubic
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const current = Math.round(start + (target - start) * eased);
+        
+        el.textContent = current.toLocaleString();
+        
+        if (progress < 1) {
+            requestAnimationFrame(update);
+        } else {
+            el.classList.remove('counting');
+        }
+    }
+    
+    requestAnimationFrame(update);
     
     updateStatusChart();
 }
