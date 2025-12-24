@@ -618,7 +618,7 @@ def extract_pdf_data(pdf_path: str, force_ocr: bool = False, max_pages: Optional
 def _main():
 	parser = argparse.ArgumentParser(description="Extract key fields from NY probate PDFs (with OCR fallback)")
 	# Default directory if nothing is provided
-        DEFAULT_DIR = os.path.join(os.path.expanduser("~"), "Downloads", "ny-probate")
+	DEFAULT_DIR = os.path.join(os.path.expanduser("~"), "Downloads", "ny-probate")
 	group = parser.add_mutually_exclusive_group(required=False)
 	group.add_argument("pdf", nargs="?", help="Path to a single PDF file")
 	group.add_argument("--dir", dest="dir", help=f"Directory containing PDF files to process (default: {DEFAULT_DIR})")

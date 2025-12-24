@@ -39,12 +39,21 @@ echo.
 echo Log in and solve the captcha, then navigate to File Search.
 echo Leave Chrome open and run probate_scraper.py in another terminal.
 
+REM Set download directory and disable PDF viewer
+set "DOWNLOAD_DIR=%USERPROFILE%\Downloads"
+
 start "" "%CHROME_APP%" ^
     --remote-debugging-port=%PORT% ^
     --user-data-dir="%USER_DIR%" ^
     --no-first-run ^
     --no-default-browser-check ^
     --disable-features=AutofillServerCommunication ^
-    --disable-breakpad
+    --disable-breakpad ^
+    --disable-pdf-viewer ^
+    --disable-plugins-discovery
 
 echo Chrome started. Keep this window open or close it - Chrome will continue running.
+echo.
+echo NOTE: If PDFs still open in browser, go to Chrome Settings ^> Privacy and Security
+echo       ^> Site Settings ^> Additional content settings ^> PDF documents
+echo       and select "Download PDFs"

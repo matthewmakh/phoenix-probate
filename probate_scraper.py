@@ -46,8 +46,11 @@ import csv
 import glob
 import time
 import random
+import shutil
 import mimetypes
 from typing import Optional
+
+import requests as http_requests  # For direct downloads
 
 # --- Selenium ---
 from selenium import webdriver
@@ -109,7 +112,8 @@ LIST_WAIT_SEC = 20
 KEEP_BROWSER_OPEN = True
 
 # Dedicated folder to avoid mixing with other PDFs
-DOWNLOAD_DIR = os.path.join(os.path.expanduser("~/Downloads"), "ny-probate")
+# Use os.path.normpath to fix mixed slashes on Windows
+DOWNLOAD_DIR = os.path.normpath(os.path.join(os.path.expanduser("~"), "Downloads", "ny-probate"))
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # Slow-and-steady pacing between cases to reduce bursts against Azure
@@ -209,11 +213,53 @@ def selected_county_name() -> str:
     return COURT_TO_COUNTY.get(COURT_VALUE, "")
 
 # =========================
+# Direct download using requests (fallback)
+# =========================
+def download_with_requests(driver, url: str, file_number: str) -> Optional[str]:
+    """
+    Download a file using requests with cookies from Selenium session.
+    This bypasses Chrome's download mechanism which can fail when attached.
+    """
+    try:
+        # Get cookies from Selenium
+        cookies = {c['name']: c['value'] for c in driver.get_cookies()}
+        
+        # Make request with browser cookies
+        headers = {
+            'User-Agent': driver.execute_script("return navigator.userAgent"),
+            'Referer': driver.current_url,
+        }
+        
+        log(f"[dl-req] Downloading via requests: {url[:80]}...")
+        resp = http_requests.get(url, cookies=cookies, headers=headers, timeout=60, stream=True)
+        
+        if resp.status_code != 200:
+            log(f"[dl-req] Failed with status {resp.status_code}")
+            return None
+        
+        # Determine filename
+        suffix = DOC_OPTIONS[SELECTED_DOC]["filename"]
+        safe_file_number = file_number.replace("/", "-").replace("\\", "-")
+        final_path = os.path.join(DOWNLOAD_DIR, f"{safe_file_number}_{suffix}.pdf")
+        
+        # Write to file
+        with open(final_path, 'wb') as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        log(f"[dl-req] Saved to {final_path}")
+        return final_path
+    except Exception as e:
+        log(f"[dl-req] Error: {e}")
+        return None
+
+# =========================
 # Browser attach
 # =========================
 def attach_driver(debug_address: str = DEBUG_ADDRESS):
     opts = Options()
     opts.add_experimental_option("debuggerAddress", debug_address)
+    # Note: prefs don't apply when attaching to existing Chrome, but we include them anyway
     opts.add_experimental_option("prefs", {
         "download.default_directory": DOWNLOAD_DIR,
         "download.prompt_for_download": False,
@@ -222,15 +268,13 @@ def attach_driver(debug_address: str = DEBUG_ADDRESS):
     })
     driver = webdriver.Chrome(options=opts)
     wait = WebDriverWait(driver, WAIT_SEC)
-    # Ensure downloads are allowed to our folder even when attaching to an existing Chrome
-    try:
-        driver.execute_cdp_cmd("Page.setDownloadBehavior", {
-            "behavior": "allow",
-            "downloadPath": DOWNLOAD_DIR
-        })
-    except Exception:
-        # Not fatal; some driver versions gate this differently
-        pass
+    
+    # NOTE: Skipping CDP download behavior commands as they may interfere with 
+    # normal Chrome downloads when attached to an existing session.
+    # Downloads will go to Chrome's default location (usually ~/Downloads)
+    # and we monitor both that and DOWNLOAD_DIR.
+    log(f"[i] Attached to Chrome. Downloads will be monitored in {DOWNLOAD_DIR} and {DEFAULT_DOWNLOADS}")
+    
     return driver, wait
 
 # =========================
@@ -424,109 +468,166 @@ def upload_file_to_drive(service, file_path: str, folder_id: Optional[str] = Non
 # =========================
 # Download handling (NEW)
 # =========================
-def wait_for_download_and_rename(file_number: str, timeout: int = 90):
+# Also check default Downloads folder as fallback when attached to existing Chrome
+DEFAULT_DOWNLOADS = os.path.normpath(os.path.join(os.path.expanduser("~"), "Downloads"))
+
+def wait_for_download_and_rename(file_number: str, timeout: int = 90, start_time: float = None):
     """
     Wait for the *newly triggered* download in DOWNLOAD_DIR, then rename it
     to <file_number>_Probate_Petition.pdf and upload it to Drive.
     Ignores any PDFs that were present before the click.
+    Also checks default Downloads folder as fallback.
+    
+    start_time: If provided, use this as the reference time for detecting new files.
+                This should be captured BEFORE clicking the download button.
     """
     global _drive_folder_id_cache
-    start = time.time()
+    if start_time is None:
+        start_time = time.time()
+    
+    log(f"[dl] DOWNLOAD_DIR = {DOWNLOAD_DIR}")
+    log(f"[dl] DEFAULT_DOWNLOADS = {DEFAULT_DOWNLOADS}")
+    log(f"[dl] Start time = {start_time}")
 
-    # Snapshot existing files to only consider new ones
-    preexisting = set(os.listdir(DOWNLOAD_DIR))
-    log(f"[dl] Snapshot has {len(preexisting)} files in {DOWNLOAD_DIR}")
+    # Ensure DOWNLOAD_DIR exists
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+    # Directories to monitor (default Downloads first since that's where Chrome usually saves)
+    dirs_to_check = [DEFAULT_DOWNLOADS, DOWNLOAD_DIR]
+    # Remove duplicates while preserving order
+    dirs_to_check = list(dict.fromkeys(dirs_to_check))
+    
+    log(f"[dl] Monitoring directories: {dirs_to_check}")
 
     new_pdf_path = None
-    candidate_crdownload = None
     tmp_sizes = {}
     reported = set()
+    check_count = 0
 
-    while time.time() - start < timeout:
-        current = set(os.listdir(DOWNLOAD_DIR))
-        new_names = [n for n in current if n not in preexisting]
-
-        # Log newly observed files once
-        unseen = [n for n in new_names if n not in reported]
-        if unseen:
-            log(f"[dl] New files detected: {', '.join(unseen)}")
-            reported.update(unseen)
-
-        # See if a fresh download started
-        for name in new_names:
-            if name.endswith(".crdownload"):
-                candidate_crdownload = os.path.join(DOWNLOAD_DIR, name)
-                log(f"[dl] Detected crdownload: {os.path.basename(candidate_crdownload)}")
-
-        # If a crdownload finished, locate the final PDF
-        if candidate_crdownload and not os.path.exists(candidate_crdownload):
-            stem = os.path.splitext(os.path.basename(candidate_crdownload))[0]
-            candidate_pdf = os.path.join(DOWNLOAD_DIR, stem)
-            log(f"[dl] crdownload finished: looking for final PDF '{os.path.basename(candidate_pdf)}'")
-            if candidate_pdf.lower().endswith(".pdf") and os.path.exists(candidate_pdf):
-                new_pdf_path = candidate_pdf
-                log(f"[dl] Found finalized PDF: {os.path.basename(new_pdf_path)}")
-            else:
-                # Fallback: any new PDF since snapshot
-                for name in os.listdir(DOWNLOAD_DIR):
-                    if name.endswith(".pdf") and name not in preexisting:
-                        new_pdf_path = os.path.join(DOWNLOAD_DIR, name)
-                        log(f"[dl] Fallback detected new PDF: {os.path.basename(new_pdf_path)}")
-                        break
-
-        # Very fast/cached downloads: no crdownload seen; accept any new PDF
-        if not candidate_crdownload:
-            for name in new_names:
-                if name.endswith(".pdf"):
-                    new_pdf_path = os.path.join(DOWNLOAD_DIR, name)
-                    log(f"[dl] New PDF without crdownload: {os.path.basename(new_pdf_path)}")
-                    break
-
-        # Handle .tmp downloads from viewer/streamed paths: detect when size stops changing
-        if not new_pdf_path:
-            for name in new_names:
-                if name.lower().endswith('.tmp'):
-                    p = os.path.join(DOWNLOAD_DIR, name)
-                    try:
-                        sz = os.path.getsize(p)
-                        prev = tmp_sizes.get(name)
-                        now = time.time()
-                        STABLE_SECS = 2.5
-                        if not prev:
-                            tmp_sizes[name] = (sz, now)
-                            log(f"[dl] Tracking tmp: {name} size={sz}")
-                        elif sz != prev[0]:
-                            log(f"[dl] tmp growing: {name} size {prev[0]} -> {sz}")
-                            # Size changed; reset timer
-                            tmp_sizes[name] = (sz, now)
-                        else:
-                            # Size unchanged; do NOT refresh timestamp so window can accumulate
-                            if (now - prev[1]) > STABLE_SECS:
-                                new_pdf_path = p
-                                log(f"[dl] tmp stabilized: {name} size={sz} for >{STABLE_SECS}s; treating as complete")
-                                break
-                    except Exception:
+    while time.time() - start_time < timeout:
+        check_count += 1
+        # Check all monitored directories
+        for check_dir in dirs_to_check:
+            try:
+                current_files = os.listdir(check_dir)
+            except Exception as e:
+                log(f"[dl] Error listing {check_dir}: {e}")
+                continue
+            
+            # Look for files modified AFTER we started waiting
+            for name in current_files:
+                # Only care about .tmp, .pdf, .crdownload files, OR files named "viewer" (Chrome's PDF viewer download name)
+                lower_name = name.lower()
+                is_valid_type = (lower_name.endswith('.tmp') or 
+                                 lower_name.endswith('.pdf') or 
+                                 lower_name.endswith('.crdownload') or
+                                 lower_name == 'viewer' or  # Chrome sometimes saves as just "viewer"
+                                 lower_name.startswith('viewer'))  # Or viewer.pdf, viewer(1).pdf, etc.
+                if not is_valid_type:
+                    continue
+                
+                # Skip files that are already properly named (already processed)
+                if '_Voluntary_Admin_Affidavit.pdf' in name or '_Probate_Petition.pdf' in name:
+                    continue
+                    
+                fp = os.path.join(check_dir, name)
+                try:
+                    current_mtime = os.path.getmtime(fp)
+                    
+                    # File is relevant if it was modified AFTER we started waiting
+                    # This handles Chrome reusing the same .tmp filename
+                    is_recent = current_mtime >= start_time - 2  # 2 second buffer for timing
+                    
+                    if not is_recent:
                         continue
+                    
+                    if name not in reported:
+                        log(f"[dl] Found recent file: {name} in {check_dir} (mtime={current_mtime:.1f}, start={start_time:.1f})")
+                        reported.add(name)
+                    
+                    # Handle .tmp files - wait for size to stabilize
+                    if lower_name.endswith('.tmp'):
+                        sz = os.path.getsize(fp)
+                        key = f"{check_dir}:{name}"
+                        prev = tmp_sizes.get(key)
+                        now = time.time()
+                        
+                        if not prev:
+                            tmp_sizes[key] = (sz, now)
+                            log(f"[dl] Tracking {name}: size={sz}")
+                        elif sz != prev[0]:
+                            tmp_sizes[key] = (sz, now)
+                            log(f"[dl] {name} growing: {prev[0]} -> {sz}")
+                        elif (now - prev[1]) > 1.5:
+                            # Size stable for 1.5 seconds - file is complete
+                            new_pdf_path = fp
+                            log(f"[dl] {name} COMPLETE! size={sz}")
+                            break
+                    
+                    # Handle .pdf files OR "viewer" files (Chrome's PDF viewer name) - wait briefly for size to stabilize
+                    elif lower_name.endswith('.pdf') or lower_name.startswith('viewer'):
+                        sz = os.path.getsize(fp)
+                        key = f"{check_dir}:{name}"
+                        prev = tmp_sizes.get(key)
+                        now = time.time()
+                        
+                        if not prev:
+                            tmp_sizes[key] = (sz, now)
+                            log(f"[dl] Tracking PDF/viewer {name}: size={sz}")
+                        elif sz != prev[0]:
+                            tmp_sizes[key] = (sz, now)
+                            log(f"[dl] PDF/viewer {name} growing: {prev[0]} -> {sz}")
+                        elif (now - prev[1]) > 1.0:
+                            # Size stable for 1 second - PDF is complete
+                            new_pdf_path = fp
+                            log(f"[dl] PDF/viewer {name} COMPLETE! size={sz}")
+                            break
+                        
+                except Exception as e:
+                    if check_count == 1:  # Only log once
+                        log(f"[dl] Error checking {name}: {e}")
+                    continue
+            
+            if new_pdf_path:
+                break
 
         if new_pdf_path:
             # Use selected filename suffix
             suffix = DOC_OPTIONS[SELECTED_DOC]["filename"]
             # Sanitize file number: replace / with - to avoid path issues
             safe_file_number = file_number.replace("/", "-").replace("\\", "-")
+            # Always save to DOWNLOAD_DIR with .pdf extension
             final_path = os.path.join(DOWNLOAD_DIR, f"{safe_file_number}_{suffix}.pdf")
-            # Move/rename
+            
+            # Ensure DOWNLOAD_DIR exists
+            os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+            
+            # Move/rename (handles .tmp -> .pdf conversion automatically)
+            source_file = new_pdf_path
+            log(f"[dl] Moving '{source_file}' -> '{final_path}'")
+            
             try:
-                log(f"[dl] Renaming '{os.path.basename(new_pdf_path)}' -> '{os.path.basename(final_path)}'")
-                os.rename(new_pdf_path, final_path)
-            except Exception as e_rename:
-                log(f"[dl] Rename failed ({e_rename}); copying to final then removing source")
+                # Use shutil.move which handles cross-drive moves and overwrites
+                if os.path.exists(final_path):
+                    os.remove(final_path)  # Remove existing file first
+                shutil.move(source_file, final_path)
+                log(f"[dl] Move successful")
+            except Exception as e_move:
+                log(f"[dl] Move failed ({e_move}); trying copy+delete")
                 try:
-                    import shutil
-                    shutil.copy2(new_pdf_path, final_path)
-                    os.remove(new_pdf_path)
+                    shutil.copy2(source_file, final_path)
+                    os.remove(source_file)
+                    log(f"[dl] Copy+delete successful")
                 except Exception as e:
                     log(f"⚠️ Could not move downloaded file: {e}")
-                    final_path = new_pdf_path  # fallback
+                    # Keep file where it is but with correct name
+                    try:
+                        fallback_path = os.path.join(os.path.dirname(source_file), f"{safe_file_number}_{suffix}.pdf")
+                        shutil.move(source_file, fallback_path)
+                        final_path = fallback_path
+                        log(f"[dl] Fallback rename in place: {fallback_path}")
+                    except Exception:
+                        final_path = source_file  # Last resort: use original
 
             log(f"✅ Saved {final_path}")
             # Tiny settle delay to let OS/Chrome finish closing handles
@@ -736,14 +837,78 @@ def scrape_case(driver, root, idx, row):
                         probate_btn = r.find_element(By.CSS_SELECTOR, "button.ButtonAsLink")
                         # Ensure clickable before clicking to avoid intercept issues
                         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(probate_btn))
+                        
+                        # Try to get the onclick URL or form action for direct download
+                        onclick = probate_btn.get_attribute("onclick") or ""
+                        form_action = None
+                        
+                        # Check if there's a form with the download URL
+                        try:
+                            form = r.find_element(By.TAG_NAME, "form")
+                            form_action = form.get_attribute("action")
+                        except Exception:
+                            pass
+                        
+                        # Track tabs before click
+                        tabs_before = set(driver.window_handles)
+                        current_tab = driver.current_window_handle
+                        
+                        # Capture time BEFORE clicking so we can detect files downloaded after this
+                        download_start_time = time.time()
+                        
+                        # Click the button to trigger download
                         probate_btn.click()
-                        human_sleep(0.15, 0.35)
                         target_found = True
                         log(f"📥 {DOC_OPTIONS[SELECTED_DOC]['filename']} download triggered for {file_number}")
-                        wait_for_download_and_rename(file_number)
+                        
+                        # Wait a moment for any new tab/popup to open or download to start
+                        time.sleep(3)
+                        
+                        # Check if a new tab opened (PDF viewer)
+                        tabs_after = set(driver.window_handles)
+                        new_tabs = tabs_after - tabs_before
+                        
+                        downloaded_path = None
+                        
+                        if new_tabs:
+                            log(f"[dl] New tab detected - checking if it's a PDF viewer")
+                            # Switch to new tab to get the PDF URL
+                            new_tab = list(new_tabs)[0]
+                            driver.switch_to.window(new_tab)
+                            time.sleep(1)
+                            pdf_url = driver.current_url
+                            log(f"[dl] New tab URL: {pdf_url}")
+                            
+                            # If it's a PDF URL or blob, try to download via requests
+                            if 'pdf' in pdf_url.lower() or 'blob:' in pdf_url or 'document' in pdf_url.lower():
+                                log(f"[dl] Attempting direct download from PDF URL...")
+                                downloaded_path = download_with_requests(driver, pdf_url, file_number)
+                            
+                            # Close the PDF viewer tab
+                            try:
+                                driver.close()
+                            except Exception:
+                                pass
+                            driver.switch_to.window(current_tab)
+                        
+                        # If no new tab or requests failed, wait for Chrome download
+                        if not downloaded_path:
+                            log("[dl] Waiting for Chrome download...")
+                            downloaded_path = wait_for_download_and_rename(file_number, timeout=60, start_time=download_start_time)
+                        
+                        # Last resort: try form action URL if we have it
+                        if not downloaded_path and form_action:
+                            log("[dl] Trying form action URL as fallback...")
+                            downloaded_path = download_with_requests(driver, form_action, file_number)
+                        
+                        if downloaded_path:
+                            log(f"✅ Successfully saved: {downloaded_path}")
+                        else:
+                            log(f"⚠️ Could not download file for {file_number}")
+                        
                         break
-                    except Exception:
-                        log("⚠️ Target document found but no button available.")
+                    except Exception as e:
+                        log(f"⚠️ Target document found but error: {e}")
         except Exception as e:
             log(f"⚠️ Could not parse documents table: {e}")
 
@@ -820,6 +985,23 @@ def scrape_current_page(driver, wait, root):
             time.sleep(INTER_CASE_DELAY_SEC)
         except Exception:
             pass
+    
+    # After scraping all rows, ensure we're back on the root tab and close any extras
+    try:
+        # Close any extra tabs that might have been left open
+        while len(driver.window_handles) > 1:
+            extra_tabs = [h for h in driver.window_handles if h != root]
+            if extra_tabs:
+                driver.switch_to.window(extra_tabs[0])
+                driver.close()
+        driver.switch_to.window(root)
+        log(f"[pagination] Cleaned up tabs, now on root window")
+    except Exception as e:
+        log(f"[pagination] Tab cleanup warning: {e}")
+        try:
+            driver.switch_to.window(root)
+        except Exception:
+            pass
 
 
 # =========================
@@ -886,8 +1068,9 @@ def main():
                 if 1 not in skip_set:
                     log(f"[pagination] Scraping page 1")
                     scrape_current_page(driver, wait, root)
-                    # Return to main search results tab to clean browser state for pagination
-                    driver.switch_to.window(driver.window_handles[0])
+                    # Ensure we're on the root tab for pagination
+                    driver.switch_to.window(root)
+                    human_sleep(0.3, 0.5)
                 else:
                     log(f"[pagination] Skipping page 1 (configured in SKIP_PAGES)")
                 
@@ -904,16 +1087,39 @@ def main():
                     
                     log(f"[pagination] Clicking to page {page_num}")
                     
+                    # Ensure we're on the root tab before pagination
+                    try:
+                        driver.switch_to.window(root)
+                        human_sleep(0.2, 0.3)
+                    except Exception:
+                        pass
+                    
+                    # Wait for results table to be present before trying to capture current state
+                    try:
+                        WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, "#NameResultsTable tbody tr"))
+                        )
+                    except Exception as wait_err:
+                        log(f"[pagination] Could not find results table before pagination: {wait_err}")
+                        continue
+                    
                     # Capture current page content to verify actual navigation
                     try:
                         current_rows = driver.find_elements(By.CSS_SELECTOR, "#NameResultsTable tbody tr")
                         current_file_numbers = []
                         for row in current_rows[:3]:  # Just check first 3 rows for comparison
                             try:
-                                file_link = row.find_element(By.CSS_SELECTOR, "td:nth-child(2) a")
-                                current_file_numbers.append(file_link.text.strip())
+                                # Try button first (like reference script)
+                                btn = row.find_element(By.CSS_SELECTOR, "button.ButtonAsLink")
+                                file_num = btn.get_attribute("value") or btn.text.strip()
+                                current_file_numbers.append(file_num)
                             except Exception:
-                                pass
+                                try:
+                                    # Fallback to link
+                                    file_link = row.find_element(By.CSS_SELECTOR, "td:nth-child(2) a")
+                                    current_file_numbers.append(file_link.text.strip())
+                                except Exception:
+                                    pass
                         log(f"[pagination] Current page first files: {current_file_numbers[:3]}")
                     except Exception:
                         current_file_numbers = []
@@ -1017,10 +1223,16 @@ def main():
                             new_file_numbers = []
                             for row in new_rows[:3]:  # Check first 3 rows
                                 try:
-                                    file_link = row.find_element(By.CSS_SELECTOR, "td:nth-child(2) a")
-                                    new_file_numbers.append(file_link.text.strip())
+                                    # Try button first (like reference script)
+                                    btn = row.find_element(By.CSS_SELECTOR, "button.ButtonAsLink")
+                                    file_num = btn.get_attribute("value") or btn.text.strip()
+                                    new_file_numbers.append(file_num)
                                 except Exception:
-                                    pass
+                                    try:
+                                        file_link = row.find_element(By.CSS_SELECTOR, "td:nth-child(2) a")
+                                        new_file_numbers.append(file_link.text.strip())
+                                    except Exception:
+                                        pass
                             
                             log(f"[pagination] New page first files: {new_file_numbers[:3]}")
                             

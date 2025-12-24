@@ -2,6 +2,7 @@ import os
 import re
 import pandas as pd
 import streamlit as st
+import usaddress
 
 DEFAULT_CSV = os.path.join("data", "probate_records.csv")
 
@@ -23,26 +24,44 @@ def load_data(path: str, mtime: float):
     if not os.path.exists(path):
         return pd.DataFrame()
     df = pd.read_csv(path)
+    
+    # Normalize column names - handle both old and new formats
+    # Map: CSV column name -> internal name we'll use
+    column_map = {
+        "County": "county",
+        "File number": "file_number",
+        "Date of death": "date_of_death",
+        "Decedent name": "decedent_name",
+        "Decedent address": "decedent_address",
+        "Executor/administrator name": "executor_name",
+        "Executor/administrator phone": "executor_phone",
+        "Executor/administrator address": "executor_address",
+        "Executor/administrator email": "executor_email",
+    }
+    
+    # Rename columns if they exist
+    rename_dict = {old: new for old, new in column_map.items() if old in df.columns}
+    df = df.rename(columns=rename_dict)
+    
     # Parse dates if present
-    for col in ("run_at", "decedent_dod", "entry_date"):
+    for col in ("date_of_death", "run_at", "decedent_dod", "entry_date"):
         if col in df.columns:
             try:
                 df[col] = pd.to_datetime(df[col], errors="coerce")
             except Exception:
                 pass
+    
     # Normalize phone/strings
-    for col in ("first_page_phone", "first_page_email", "file_number", "docket", "county", "case_type"):
+    for col in ("executor_phone", "executor_email", "file_number", "county"):
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip()
+    
     # Create a simple unique id
-    if {"file_number", "docket"}.issubset(df.columns):
-        df["record_id"] = df["file_number"].fillna("") + "|" + df["docket"].fillna("")
-    elif "file_number" in df.columns:
+    if "file_number" in df.columns:
         df["record_id"] = df["file_number"].fillna("")
-    elif "source_file" in df.columns:
-        df["record_id"] = df["source_file"].fillna("")
     else:
         df["record_id"] = df.index.astype(str)
+    
     return df
 
 if reload:
@@ -56,39 +75,59 @@ if df.empty:
     st.stop()
 
 with st.sidebar:
-    counties = sorted([c for c in df.get("county", pd.Series([])).dropna().unique() if c])
+    # County filter
+    counties = sorted([c for c in df.get("county", pd.Series([])).dropna().unique() if c and c != "nan"])
     county_choice = st.selectbox("County", ["All"] + counties, index=0)
-    name_query = st.text_input("Search Decedent/Contact Name")
+    
+    # Name search
+    name_query = st.text_input("Search Name (Decedent or Executor)")
+    
+    # Hide apartments filter
     hide_apartments = st.checkbox("Hide apartments (Apt/Unit/Suite/#)", value=False)
 
 fdf = df.copy()
+
+# Apply county filter
 if county_choice and county_choice != "All":
     fdf = fdf[fdf["county"] == county_choice]
+
+# Apply name search filter
 if name_query:
     nq = name_query.strip().lower()
-    cols = [c for c in ["decedent_name", "first_page_name"] if c in fdf.columns]
+    cols = [c for c in ["decedent_name", "executor_name"] if c in fdf.columns]
     if cols:
-        mask = False
+        mask = pd.Series([False] * len(fdf), index=fdf.index)
         for c in cols:
-            mask = mask | fdf[c].fillna("").str.lower().str.contains(nq)
+            mask = mask | fdf[c].fillna("").str.lower().str.contains(nq, regex=False)
         fdf = fdf[mask]
 
 # Optional filter: hide addresses that look like apartments/units
 def _looks_like_apartment(s: str) -> bool:
+    """Use usaddress library to detect if address contains a unit/apartment."""
     if not s:
         return False
     s = str(s)
-    low = s.lower()
-    # Common unit markers
-    if re.search(r"\b(apt|apartment|unit|suite|ste|fl|floor)\b", low):
-        return True
-    # Inline '#' unit notation like '# 4J'
-    if re.search(r"(^|\s)#\s*[a-z0-9\-]+\b", low):
-        return True
-    return False
+    if s == "nan" or s.strip() == "":
+        return False
+    
+    try:
+        parsed, _ = usaddress.tag(s)
+        # Check for occupancy indicators (Apt, Suite, Unit, Floor, etc.)
+        return "OccupancyType" in parsed or "OccupancyIdentifier" in parsed
+    except usaddress.RepeatedLabelError:
+        # Fallback to regex if usaddress can't parse
+        low = s.lower()
+        if re.search(r"\b(apt\.?|apartment|unit|suite|ste\.?|fl\.?|floor|rm\.?|room)\b", low):
+            return True
+        return False
+    except Exception:
+        return False
 
-if hide_apartments and "first_page_address_lines" in fdf.columns:
-    fdf = fdf[~fdf["first_page_address_lines"].fillna("").map(_looks_like_apartment)]
+if hide_apartments:
+    # Check both decedent and executor addresses
+    for addr_col in ["decedent_address", "executor_address"]:
+        if addr_col in fdf.columns:
+            fdf = fdf[~fdf[addr_col].fillna("").map(_looks_like_apartment)]
 
 st.subheader("Overview")
 left, mid, right = st.columns(3)
@@ -100,34 +139,53 @@ with right:
     st.metric("Unique File Numbers", fdf.get("file_number", pd.Series([])).nunique())
 
 st.subheader("Records Table")
+
+# Display columns in order
 display_cols = [
     c for c in [
         "county",
         "file_number",
         "decedent_name",
-        "decedent_dod",   # DOD
-        "first_page_phone",
-        "first_page_address_lines",
-        "first_page_email",
-        "source_file",
+        "date_of_death",
+        "decedent_address",
+        "executor_name",
+        "executor_phone",
+        "executor_address",
+        "executor_email",
     ] if c in fdf.columns
 ]
-# Build a safe sort key list limited to visible columns
-sort_candidates = ["run_at", "county", "file_number"]
-sort_by = [c for c in sort_candidates if c in fdf.columns and c in display_cols]
-asc_map = {"run_at": False, "county": True, "file_number": True}
-asc_flags = [asc_map[c] for c in sort_by]
+
+# Friendly column names for display
+column_labels = {
+    "county": "County",
+    "file_number": "File Number",
+    "decedent_name": "Decedent Name",
+    "date_of_death": "Date of Death",
+    "decedent_address": "Decedent Address",
+    "executor_name": "Executor/Admin Name",
+    "executor_phone": "Phone",
+    "executor_address": "Executor Address",
+    "executor_email": "Email",
+}
 
 df_view = fdf[display_cols] if display_cols else fdf
+
+# Sort by county then file number
+sort_by = [c for c in ["county", "file_number"] if c in df_view.columns]
 if sort_by:
     try:
-        df_view = df_view.sort_values(by=sort_by, ascending=asc_flags)
+        df_view = df_view.sort_values(by=sort_by, ascending=True)
     except Exception:
         pass
+
+# Rename columns for display
+df_view = df_view.rename(columns=column_labels)
+
 st.dataframe(df_view, height=520, use_container_width=True)
 
-st.subheader("Breakdown")
+st.subheader("Breakdown by County")
 if "county" in fdf.columns and not fdf.empty:
-    st.bar_chart(fdf["county"].value_counts().sort_values(ascending=False))
+    county_counts = fdf["county"].value_counts().sort_values(ascending=False)
+    st.bar_chart(county_counts)
 
-st.caption("Data source: CSV generated by pdf_data_extractor.py")
+st.caption("Data source: CSV generated by probate_scraper.py")
