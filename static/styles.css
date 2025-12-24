@@ -348,18 +348,18 @@ body {
 
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
     margin-bottom: 24px;
 }
 
 .stat-card {
     background: var(--bg-secondary);
     border-radius: var(--radius-lg);
-    padding: 20px;
+    padding: 16px;
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     border: 1px solid var(--border-color);
     transition: var(--transition);
 }
@@ -1035,14 +1035,46 @@ body {
 
 @media (max-width: 768px) {
     .sidebar {
-        position: fixed;
-        left: -260px;
-        z-index: 1001;
-        width: 260px;
+        display: none;
     }
     
-    .sidebar.open {
-        left: 0;
+    .main-content {
+        padding: 12px;
+        padding-top: 8px;
+    }
+    
+    .view-title {
+        font-size: 1.25rem;
+    }
+    
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+    
+    .stat-card {
+        padding: 12px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .stat-icon {
+        width: 36px;
+        height: 36px;
+    }
+    
+    .stat-icon svg {
+        width: 18px;
+        height: 18px;
+    }
+    
+    .stat-value {
+        font-size: 1.5rem;
+    }
+    
+    .stat-label {
+        font-size: 0.7rem;
     }
     
     .slide-panel {
@@ -1052,12 +1084,54 @@ body {
     
     .topbar {
         flex-wrap: wrap;
+        padding: 8px 12px;
+        gap: 8px;
     }
     
     .search-box {
         order: 2;
         width: 100%;
         max-width: none;
+    }
+    
+    .topbar-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+    
+    .filter-select {
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .card {
+        padding: 12px;
+    }
+    
+    .table-container {
+        margin: 0 -12px;
+        border-radius: 0;
+    }
+    
+    .records-table th,
+    .records-table td {
+        padding: 8px 6px;
+        font-size: 0.75rem;
+    }
+    
+    /* Hide less important columns on mobile */
+    .records-table th:nth-child(5),
+    .records-table td:nth-child(5),
+    .records-table th:nth-child(8),
+    .records-table td:nth-child(8),
+    .records-table th:nth-child(9),
+    .records-table td:nth-child(9) {
+        display: none;
     }
 }
 
