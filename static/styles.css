@@ -364,9 +364,18 @@ body {
     transition: var(--transition);
 }
 
+.stat-card.clickable {
+    cursor: pointer;
+}
+
 .stat-card:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-lg);
+}
+
+.stat-card.clickable:active {
+    transform: translateY(0);
+    box-shadow: var(--shadow-sm);
 }
 
 .stat-icon {
@@ -1030,30 +1039,10 @@ body {
         left: -260px;
         z-index: 1001;
         width: 260px;
-        transition: left 0.3s ease;
     }
     
     .sidebar.open {
         left: 0;
-    }
-    
-    .sidebar-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,0.5);
-        z-index: 1000;
-        opacity: 0;
-        visibility: hidden;
-        transition: all 0.3s ease;
-    }
-    
-    .sidebar-overlay.show {
-        opacity: 1;
-        visibility: visible;
-    }
-    
-    .btn-menu {
-        display: flex;
     }
     
     .slide-panel {
@@ -1070,77 +1059,6 @@ body {
         width: 100%;
         max-width: none;
     }
-    
-    .main-content {
-        padding-bottom: 70px;
-    }
-    
-    .mobile-nav {
-        display: flex;
-    }
-}
-
-/* Mobile Bottom Navigation */
-.mobile-nav {
-    display: none;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 64px;
-    background: var(--bg-secondary);
-    border-top: 1px solid var(--border-color);
-    z-index: 999;
-    justify-content: space-around;
-    align-items: center;
-    padding: 0 8px;
-}
-
-.mobile-nav-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    padding: 8px 12px;
-    color: var(--text-muted);
-    text-decoration: none;
-    font-size: 11px;
-    font-weight: 500;
-    border-radius: var(--radius-md);
-    transition: var(--transition);
-}
-
-.mobile-nav-item svg {
-    width: 22px;
-    height: 22px;
-}
-
-.mobile-nav-item.active {
-    color: var(--accent-blue);
-}
-
-.mobile-nav-item:active {
-    background: var(--bg-tertiary);
-}
-
-/* Hamburger Menu Button */
-.btn-menu {
-    display: none;
-    width: 40px;
-    height: 40px;
-    border: none;
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
-.btn-menu svg {
-    width: 20px;
-    height: 20px;
-    color: var(--text-primary);
 }
 
 /* Scrollbar */

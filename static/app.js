@@ -300,14 +300,8 @@ function esc(str) {
 function switchView(view) {
     currentView = view;
     
-    // Update sidebar nav active state
     $$('.nav-item').forEach(n => n.classList.remove('active'));
     $(`.nav-item[data-view="${view}"]`).classList.add('active');
-    
-    // Update mobile nav active state
-    $$('.mobile-nav-item').forEach(n => n.classList.remove('active'));
-    const mobileNavItem = $(`.mobile-nav-item[data-view="${view}"]`);
-    if (mobileNavItem) mobileNavItem.classList.add('active');
     
     $$('.view').forEach(v => v.classList.remove('active'));
     
@@ -535,16 +529,6 @@ function showLoading(show) {
     $('#loading').classList.toggle('show', show);
 }
 
-function toggleSidebar() {
-    $('.sidebar').classList.toggle('open');
-    $('#sidebarOverlay').classList.toggle('show');
-}
-
-function closeSidebar() {
-    $('.sidebar').classList.remove('open');
-    $('#sidebarOverlay').classList.remove('show');
-}
-
 // Event Listeners
 function setupEventListeners() {
     // Search
@@ -569,32 +553,18 @@ function setupEventListeners() {
         n.addEventListener('click', (e) => {
             e.preventDefault();
             switchView(n.dataset.view);
-            closeSidebar();
         });
     });
     
-    // Mobile Navigation
-    $$('.mobile-nav-item').forEach(n => {
-        n.addEventListener('click', (e) => {
-            e.preventDefault();
-            switchView(n.dataset.view);
-            // Update mobile nav active state
-            $$('.mobile-nav-item').forEach(m => m.classList.remove('active'));
-            n.classList.add('active');
+    // Clickable stat cards (for mobile navigation)
+    $$('.stat-card.clickable').forEach(card => {
+        card.addEventListener('click', () => {
+            const view = card.dataset.view;
+            if (view) {
+                switchView(view);
+            }
         });
     });
-    
-    // Hamburger menu
-    const menuToggle = $('#menuToggle');
-    if (menuToggle) {
-        menuToggle.addEventListener('click', toggleSidebar);
-    }
-    
-    // Sidebar overlay click to close
-    const sidebarOverlay = $('#sidebarOverlay');
-    if (sidebarOverlay) {
-        sidebarOverlay.addEventListener('click', closeSidebar);
-    }
     
     // Table sorting
     $$('.records-table th.sortable').forEach(th => {
