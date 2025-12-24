@@ -836,6 +836,7 @@ def process_downloaded_pdf(final_path: str, site_file_number: Optional[str] = No
 # Scraping logic
 # =========================
 def scrape_case(driver, root, idx, row):
+    """Scrape a single case. Returns True if actually processed, False if skipped."""
     try:
         btn = row.find_element(By.CSS_SELECTOR, "button.ButtonAsLink")
         file_num = btn.get_attribute("value") or btn.text.strip()
@@ -843,7 +844,7 @@ def scrape_case(driver, root, idx, row):
         # Check if this file number already exists in CSV or database
         if is_file_number_exists(file_num):
             log(f"[{idx}] ⏭️  Skipping {file_num} - already exists")
-            return
+            return False  # Signal that we skipped this one
         
         log(f"[{idx}] Opening file {file_num} in a new tab")
 
@@ -995,6 +996,7 @@ def scrape_case(driver, root, idx, row):
         driver.close()
         driver.switch_to.window(root)
         human_sleep(0.4, 0.8)
+        return True  # Successfully processed (even if no doc found)
 
     except Exception as e:
         log(f"⚠️ Row {idx} failed: {e}")
@@ -1007,6 +1009,7 @@ def scrape_case(driver, root, idx, row):
                 driver.switch_to.window(root)
             except Exception:
                 pass
+        return True  # Processed (with error), still counts as not skipped
 
 # =========================
 # Pagination
@@ -1056,22 +1059,23 @@ def scrape_current_page(driver, wait, root):
     log(f"[OK] Found {len(rows)} rows on this page")
 
     for idx, row in enumerate(rows, start=1):
-        scrape_case(driver, root, idx, row)
-        try:
-            time.sleep(INTER_CASE_DELAY_SEC)
-        except Exception:
-            pass
+        was_processed = scrape_case(driver, root, idx, row)
+        # Only delay between cases that were actually processed (not skipped)
+        if was_processed:
+            try:
+                time.sleep(INTER_CASE_DELAY_SEC)
+            except Exception:
+                pass
     
     # After scraping all rows, ensure we're back on the root tab and close any extras
     try:
         # Close any extra tabs that might have been left open
-        while len(driver.window_handles) > 1:
+        if len(driver.window_handles) > 1:
             extra_tabs = [h for h in driver.window_handles if h != root]
-            if extra_tabs:
-                driver.switch_to.window(extra_tabs[0])
+            for tab in extra_tabs:
+                driver.switch_to.window(tab)
                 driver.close()
         driver.switch_to.window(root)
-        log(f"[pagination] Cleaned up tabs, now on root window")
     except Exception as e:
         log(f"[pagination] Tab cleanup warning: {e}")
         try:
@@ -1129,50 +1133,61 @@ def main():
             # Old behavior: scrape only first page
             scrape_current_page(driver, wait, root)
         else:
-            # Pagination enabled: scrape all pages
+            # Pagination enabled: scrape all pages dynamically
             skip_set = parse_skip_pages(SKIP_PAGES)
+            processed_pages = set()  # Track which pages we've already scraped
             
-            # Get all page links
+            # Get initial page links
             pagination_links = get_pagination_links(driver)
             if not pagination_links:
                 log("[pagination] No pagination found; scraping current page only")
                 scrape_current_page(driver, wait, root)
             else:
-                log(f"[pagination] Found {len(pagination_links)} pages")
+                log(f"[pagination] Found {len(pagination_links)} initial pages: {[p['page'] for p in pagination_links]}")
                 
                 # Always scrape page 1 first (current page after search)
                 if 1 not in skip_set:
                     log(f"[pagination] Scraping page 1")
                     scrape_current_page(driver, wait, root)
+                    processed_pages.add(1)
                     # Ensure we're on the root tab for pagination
                     driver.switch_to.window(root)
                     human_sleep(0.3, 0.5)
                 else:
                     log(f"[pagination] Skipping page 1 (configured in SKIP_PAGES)")
+                    processed_pages.add(1)  # Mark as processed even if skipped
                 
-                # Navigate to remaining pages by clicking the pagination links
-                for page_info in pagination_links:
-                    page_num = page_info["page"]
+                # Keep processing until we've handled all discoverable pages
+                while True:
+                    # Re-scan pagination to discover any new pages that appeared
+                    pagination_links = get_pagination_links(driver)
+                    available_pages = {p['page'] for p in pagination_links}
                     
-                    if page_num == 1:
-                        continue  # Already scraped above
+                    # Find pages we haven't processed yet
+                    unprocessed = available_pages - processed_pages
+                    if not unprocessed:
+                        log(f"[pagination] No more unprocessed pages. Processed: {sorted(processed_pages)}")
+                        break
+                    
+                    # Get the next page to process (smallest unprocessed page number)
+                    page_num = min(unprocessed)
                     
                     if page_num in skip_set:
                         log(f"[pagination] Skipping page {page_num} (configured in SKIP_PAGES)")
+                        processed_pages.add(page_num)
                         continue
                     
-                    log(f"[pagination] Clicking to page {page_num}")
+                    log(f"[pagination] Clicking to page {page_num} (available: {sorted(available_pages)}, processed: {sorted(processed_pages)})")
                     
                     # Ensure we're on the root tab before pagination
                     try:
                         driver.switch_to.window(root)
-                        human_sleep(0.2, 0.3)
                     except Exception:
                         pass
                     
-                    # Wait for results table to be present before trying to capture current state
+                    # Quick check that results table is present (should already be there)
                     try:
-                        WebDriverWait(driver, 10).until(
+                        WebDriverWait(driver, 3).until(
                             EC.presence_of_element_located((By.CSS_SELECTOR, "#NameResultsTable tbody tr"))
                         )
                     except Exception as wait_err:
@@ -1331,10 +1346,13 @@ def main():
                     if page_clicked_successfully:
                         try:
                             scrape_current_page(driver, wait, root)
+                            processed_pages.add(page_num)
                         except Exception as scrape_err:
                             log(f"[pagination] Error scraping page {page_num}: {scrape_err}")
+                            processed_pages.add(page_num)  # Mark as processed to avoid infinite loop
                     else:
                         log(f"[pagination] Failed to navigate to page {page_num} after {max_retries} attempts, skipping...")
+                        processed_pages.add(page_num)  # Mark as processed to avoid infinite loop
                         continue
 
         log("[✓] Finished all pages")
