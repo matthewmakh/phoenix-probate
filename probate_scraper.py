@@ -69,7 +69,7 @@ from google.auth.transport.requests import Request
 # =========================
 # Config (edit as needed)
 # =========================
-COURT_VALUE = "41"          # Queens County = 41
+COURT_VALUE = "24"          # Queens County = 41
 # Single switch for the target document type. Options: "PROBATE", "VOLUNTARY"
 #SELECTED_DOC = "PROBATE"  # Change to "VOLUNTARY" to target Voluntary Admin Affidavit
 SELECTED_DOC = "VOLUNTARY"  # Change to "VOLUNTARY" to target Voluntary Admin Affidavit
@@ -91,8 +91,20 @@ DOC_OPTIONS = {
 
 # Derived proceeding text for the search form from the selection above
 PROCEEDING_TEXT = DOC_OPTIONS[SELECTED_DOC]["proceeding"]
-DATE_FROM = "11/01/2025"
-DATE_TO   = "11/30/2025"
+
+# Calculate date range for the last 30 days
+from datetime import datetime, timedelta
+
+def get_last_30_days_range():
+    """Returns dates for the last 30 days in MM/DD/YYYY format."""
+    today = datetime.now()
+    thirty_days_ago = today - timedelta(days=30)
+    
+    date_from = thirty_days_ago.strftime("%m/%d/%Y")
+    date_to = today.strftime("%m/%d/%Y")
+    return date_from, date_to
+
+DATE_FROM, DATE_TO = get_last_30_days_range()
 
 # Pagination controls: set to 0 to disable pagination, or specify pages to skip (comma-separated)
 # Examples:
