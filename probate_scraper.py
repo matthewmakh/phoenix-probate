@@ -106,6 +106,11 @@ SKIP_PAGES = ""  # comma-separated page numbers to skip, e.g. "1,3,5"
 SKIP_EXISTING_IN_CSV = True
 CSV_PATH = os.path.join(os.path.dirname(__file__), "data", "probate_records.csv")
 
+# PostgreSQL configuration: set to True to save to remote database (Railway)
+# Requires DATABASE_URL environment variable to be set
+USE_POSTGRESQL = True  # Set to False to use CSV only
+SKIP_EXISTING_IN_DB = True  # Skip cases already in PostgreSQL database
+
 DEBUG_ADDRESS = "127.0.0.1:9222"
 WAIT_SEC = 30
 LIST_WAIT_SEC = 20
@@ -170,6 +175,7 @@ COURT_TO_COUNTY = {
 
 # Cache for existing file numbers in CSV
 _existing_file_numbers = None
+_existing_file_numbers_db = None
 
 def load_existing_file_numbers():
     """Load all file numbers from the CSV into a set for fast lookup."""
@@ -198,16 +204,58 @@ def load_existing_file_numbers():
     
     return _existing_file_numbers
 
+
+def load_existing_file_numbers_from_db():
+    """Load all file numbers from PostgreSQL database into a set for fast lookup."""
+    global _existing_file_numbers_db
+    if _existing_file_numbers_db is not None:
+        return _existing_file_numbers_db
+    
+    _existing_file_numbers_db = set()
+    if not USE_POSTGRESQL or not SKIP_EXISTING_IN_DB:
+        return _existing_file_numbers_db
+    
+    try:
+        from db_client import load_existing_file_numbers as db_load
+        _existing_file_numbers_db = db_load()
+        log(f"[DB] Loaded {len(_existing_file_numbers_db)} existing file numbers from database")
+    except Exception as e:
+        log(f"[DB] Error loading file numbers from database: {e}")
+    
+    return _existing_file_numbers_db
+
+
 def is_file_number_in_csv(file_number: str) -> bool:
     """Check if a file number already exists in the CSV."""
     existing = load_existing_file_numbers()
     return file_number.strip() in existing
 
+
+def is_file_number_exists(file_number: str) -> bool:
+    """Check if a file number exists in CSV or database (depending on config)."""
+    file_num = file_number.strip()
+    
+    # Check CSV if enabled
+    if SKIP_EXISTING_IN_CSV and is_file_number_in_csv(file_num):
+        return True
+    
+    # Check database if enabled
+    if USE_POSTGRESQL and SKIP_EXISTING_IN_DB:
+        db_existing = load_existing_file_numbers_from_db()
+        if file_num in db_existing:
+            return True
+    
+    return False
+
+
 def add_file_number_to_cache(file_number: str) -> None:
     """Add a file number to the cache after processing."""
-    global _existing_file_numbers
+    global _existing_file_numbers, _existing_file_numbers_db
+    file_num = file_number.strip()
     if _existing_file_numbers is not None:
-        _existing_file_numbers.add(file_number.strip())
+        _existing_file_numbers.add(file_num)
+    if _existing_file_numbers_db is not None:
+        _existing_file_numbers_db.add(file_num)
 
 def selected_county_name() -> str:
     return COURT_TO_COUNTY.get(COURT_VALUE, "")
@@ -718,7 +766,23 @@ def process_downloaded_pdf(final_path: str, site_file_number: Optional[str] = No
         "Executor/administrator email": (llm_data.get("Executor/administrator email") or ""),
     }
 
-    # Upsert into CSV by file_number
+    # Save to PostgreSQL database if enabled
+    if USE_POSTGRESQL:
+        try:
+            from db_client import save_record_to_db
+            db_ok = save_record_to_db(
+                county_name=county_name,
+                site_file_number=site_file_number,
+                llm_data=llm_data
+            )
+            if db_ok:
+                log("[i] Record saved to PostgreSQL database")
+            else:
+                log("⚠️ Failed to save record to PostgreSQL database")
+        except Exception as e:
+            log(f"⚠️ Database save error: {e}")
+
+    # Also upsert into CSV as backup
     existing = []
     if os.path.exists(CSV_PATH):
         with open(CSV_PATH, "r", encoding="utf-8", newline="") as f:
@@ -764,9 +828,9 @@ def scrape_case(driver, root, idx, row):
         btn = row.find_element(By.CSS_SELECTOR, "button.ButtonAsLink")
         file_num = btn.get_attribute("value") or btn.text.strip()
         
-        # Check if this file number already exists in CSV
-        if SKIP_EXISTING_IN_CSV and is_file_number_in_csv(file_num):
-            log(f"[{idx}] ⏭️  Skipping {file_num} - already exists in CSV")
+        # Check if this file number already exists in CSV or database
+        if is_file_number_exists(file_num):
+            log(f"[{idx}] ⏭️  Skipping {file_num} - already exists")
             return
         
         log(f"[{idx}] Opening file {file_num} in a new tab")

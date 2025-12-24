@@ -1,0 +1,8 @@
+# Requirements for Railway deployment (dashboard only)
+# This is a minimal set of dependencies for the web server
+flask>=3.0.0
+flask-cors>=4.0.0
+SQLAlchemy>=2.0.0
+psycopg2-binary>=2.9.9
+gunicorn>=21.0.0
+python-dotenv>=1.0.1
