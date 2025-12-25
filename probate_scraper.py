@@ -42,7 +42,6 @@ NY Surrogate Court scraper after captcha is solved.
 
 import os
 import io
-import csv
 import glob
 import time
 import random
@@ -114,10 +113,6 @@ DATE_FROM, DATE_TO = get_last_30_days_range()
 PAGINATION_ENABLED = True
 SKIP_PAGES = ""  # comma-separated page numbers to skip, e.g. "1,3,5"
 
-# CSV skip configuration: skip cases if file number already exists in CSV
-SKIP_EXISTING_IN_CSV = True
-CSV_PATH = os.path.join(os.path.dirname(__file__), "data", "probate_records.csv")
-
 # PostgreSQL configuration: set to True to save to remote database (Railway)
 # Requires DATABASE_URL environment variable to be set
 USE_POSTGRESQL = True  # Set to False to use CSV only
@@ -185,89 +180,23 @@ COURT_TO_COUNTY = {
     "3": "Bronx"
 }
 
-# Cache for existing file numbers in CSV
-_existing_file_numbers = None
-_existing_file_numbers_db = None
-
-def load_existing_file_numbers():
-    """Load all file numbers from the CSV into a set for fast lookup."""
-    global _existing_file_numbers
-    if _existing_file_numbers is not None:
-        return _existing_file_numbers
-    
-    _existing_file_numbers = set()
-    if not SKIP_EXISTING_IN_CSV:
-        return _existing_file_numbers
-    
-    if not os.path.exists(CSV_PATH):
-        log(f"[CSV] File not found: {CSV_PATH}, will not skip any cases")
-        return _existing_file_numbers
-    
-    try:
-        with open(CSV_PATH, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                file_num = row.get("File number", "").strip()
-                if file_num:
-                    _existing_file_numbers.add(file_num)
-        log(f"[CSV] Loaded {len(_existing_file_numbers)} existing file numbers from CSV")
-    except Exception as e:
-        log(f"[CSV] Error reading CSV: {e}")
-    
-    return _existing_file_numbers
-
-
-def load_existing_file_numbers_from_db():
-    """Load all file numbers from PostgreSQL database into a set for fast lookup."""
-    global _existing_file_numbers_db
-    if _existing_file_numbers_db is not None:
-        return _existing_file_numbers_db
-    
-    _existing_file_numbers_db = set()
-    if not USE_POSTGRESQL or not SKIP_EXISTING_IN_DB:
-        return _existing_file_numbers_db
-    
-    try:
-        from db_client import load_existing_file_numbers as db_load
-        _existing_file_numbers_db = db_load()
-        log(f"[DB] Loaded {len(_existing_file_numbers_db)} existing file numbers from database")
-    except Exception as e:
-        log(f"[DB] Error loading file numbers from database: {e}")
-    
-    return _existing_file_numbers_db
-
-
-def is_file_number_in_csv(file_number: str) -> bool:
-    """Check if a file number already exists in the CSV."""
-    existing = load_existing_file_numbers()
-    return file_number.strip() in existing
-
 
 def is_file_number_exists(file_number: str) -> bool:
-    """Check if a file number exists in CSV or database (depending on config)."""
+    """Check if a file number already exists in the database."""
     file_num = file_number.strip()
     
-    # Check CSV if enabled
-    if SKIP_EXISTING_IN_CSV and is_file_number_in_csv(file_num):
-        return True
-    
-    # Check database if enabled
     if USE_POSTGRESQL and SKIP_EXISTING_IN_DB:
-        db_existing = load_existing_file_numbers_from_db()
-        if file_num in db_existing:
-            return True
+        from db_client import is_file_number_in_db
+        return is_file_number_in_db(file_num)
     
     return False
 
 
 def add_file_number_to_cache(file_number: str) -> None:
-    """Add a file number to the cache after processing."""
-    global _existing_file_numbers, _existing_file_numbers_db
-    file_num = file_number.strip()
-    if _existing_file_numbers is not None:
-        _existing_file_numbers.add(file_num)
-    if _existing_file_numbers_db is not None:
-        _existing_file_numbers_db.add(file_num)
+    """Add a file number to the db_client cache after processing."""
+    if USE_POSTGRESQL:
+        from db_client import add_file_number_to_cache as db_add_cache
+        db_add_cache(file_number.strip())
 
 def selected_county_name() -> str:
     return COURT_TO_COUNTY.get(COURT_VALUE, "")
@@ -751,34 +680,7 @@ def process_downloaded_pdf(final_path: str, site_file_number: Optional[str] = No
         log("⚠️ LLM extraction returned no data")
         return False
 
-    # Prepare CSV row
-    CSV_PATH = os.path.join("data", "probate_records.csv")
-    os.makedirs("data", exist_ok=True)
-    columns = [
-        "County",
-        "File number",
-        "Date of death",
-        "Decedent name",
-        "Decedent address",
-        "Executor/administrator name",
-        "Executor/administrator phone",
-        "Executor/administrator address",
-        "Executor/administrator email",
-    ]
-    
-    row = {
-        "County": (county_name or llm_data.get("County") or ""),
-        "File number": (site_file_number or llm_data.get("File number") or ""),
-        "Date of death": (llm_data.get("Date of death") or ""),
-        "Decedent name": (llm_data.get("Decedent name") or ""),
-        "Decedent address": (llm_data.get("Decedent address") or ""),
-        "Executor/administrator name": (llm_data.get("Executor/administrator name") or ""),
-        "Executor/administrator phone": (llm_data.get("Executor/administrator phone") or ""),
-        "Executor/administrator address": (llm_data.get("Executor/administrator address") or ""),
-        "Executor/administrator email": (llm_data.get("Executor/administrator email") or ""),
-    }
-
-    # Save to PostgreSQL database if enabled
+    # Save to PostgreSQL database
     if USE_POSTGRESQL:
         try:
             from db_client import save_record_to_db
@@ -793,39 +695,9 @@ def process_downloaded_pdf(final_path: str, site_file_number: Optional[str] = No
                 log("⚠️ Failed to save record to PostgreSQL database")
         except Exception as e:
             log(f"⚠️ Database save error: {e}")
-
-    # Also upsert into CSV as backup
-    existing = []
-    if os.path.exists(CSV_PATH):
-        with open(CSV_PATH, "r", encoding="utf-8", newline="") as f:
-            rdr = csv.DictReader(f)
-            existing = [dict(r) for r in rdr]
-
-    def _key(r: dict):
-        fn = (r.get("File number") or "").strip()
-        if fn:
-            return ("fn", fn)
-        # Fallback to decedent name if file number is missing
-        return ("name", (r.get("Decedent name") or "").strip())
-
-    key_new = _key(row)
-    replaced = False
-    for i, r in enumerate(existing):
-        if _key(r) == key_new:
-            existing[i] = {**r, **{k: ("" if row.get(k) is None else str(row.get(k))) for k in columns}}
-            replaced = True
-            break
-    if not replaced:
-        existing.append({k: ("" if row.get(k) is None else str(row.get(k))) for k in columns})
-
-    with open(CSV_PATH, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=columns)
-        w.writeheader()
-        for r in existing:
-            w.writerow({k: ("" if r.get(k) is None else str(r.get(k))) for k in columns})
     
     # Add to cache so we don't re-process this file number
-    file_number = row.get("File number", "").strip()
+    file_number = (site_file_number or llm_data.get("File number") or "").strip()
     if file_number:
         add_file_number_to_cache(file_number)
     
@@ -841,7 +713,7 @@ def scrape_case(driver, root, idx, row):
         btn = row.find_element(By.CSS_SELECTOR, "button.ButtonAsLink")
         file_num = btn.get_attribute("value") or btn.text.strip()
         
-        # Check if this file number already exists in CSV or database
+        # Check if this file number already exists in the database
         if is_file_number_exists(file_num):
             log(f"[{idx}] ⏭️  Skipping {file_num} - already exists")
             return False  # Signal that we skipped this one
@@ -1089,10 +961,6 @@ def scrape_current_page(driver, wait, root):
 # =========================
 def main():
     driver, wait = attach_driver()
-
-    # Load existing CSV records for skip checking
-    if SKIP_EXISTING_IN_CSV:
-        load_existing_file_numbers()
 
     try:
         # Ensure we're controlling the correct tab

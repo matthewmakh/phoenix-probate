@@ -248,9 +248,7 @@ function applyFilters() {
             const val = parseFloat((r.estimated_estate_value || '').replace(/[^0-9.]/g, '')) || 0;
             if (estateValue === 'hasValue' && val <= 0) return false;
             if (estateValue === 'under10k' && (val <= 0 || val >= 10000)) return false;
-            if (estateValue === '10k-30k' && (val < 10000 || val >= 30000)) return false;
-            if (estateValue === '30k-50k' && (val < 30000 || val >= 50000)) return false;
-            if (estateValue === 'over50k' && val < 50000) return false;
+            if (estateValue === 'over10k' && val < 10000) return false;
         }
         
         // Search filter
@@ -597,18 +595,18 @@ function setupEventListeners() {
         timeout = setTimeout(applyFilters, 200);
     });
     
-    // Filters
-    $('#countyFilter').addEventListener('change', applyFilters);
-    $('#statusFilter').addEventListener('change', applyFilters);
-    $('#relationshipFilter').addEventListener('change', applyFilters);
-    $('#estateValueFilter').addEventListener('change', applyFilters);
-    $('#hideApartments').addEventListener('change', applyFilters);
+    // Filters - use optional chaining to prevent errors if elements don't exist
+    $('#countyFilter')?.addEventListener('change', applyFilters);
+    $('#statusFilter')?.addEventListener('change', applyFilters);
+    $('#relationshipFilter')?.addEventListener('change', applyFilters);
+    $('#estateValueFilter')?.addEventListener('change', applyFilters);
+    $('#hideApartments')?.addEventListener('change', applyFilters);
     
     // Refresh
-    $('#refreshBtn').addEventListener('click', loadRecords);
+    $('#refreshBtn')?.addEventListener('click', loadRecords);
     
     // Theme
-    $('#themeToggle').addEventListener('click', toggleTheme);
+    $('#themeToggle')?.addEventListener('click', toggleTheme);
     
     // Navigation
     $$('.nav-item').forEach(n => {
@@ -643,7 +641,7 @@ function setupEventListeners() {
     });
     
     // Row click
-    $('#recordsBody').addEventListener('click', (e) => {
+    $('#recordsBody')?.addEventListener('click', (e) => {
         const row = e.target.closest('tr');
         if (row && !e.target.closest('button') && !e.target.closest('a')) {
             openPanel(parseInt(row.dataset.index));
@@ -651,15 +649,15 @@ function setupEventListeners() {
     });
     
     // Panel close
-    $('#panelClose').addEventListener('click', closePanel);
-    $('#panelOverlay').addEventListener('click', closePanel);
+    $('#panelClose')?.addEventListener('click', closePanel);
+    $('#panelOverlay')?.addEventListener('click', closePanel);
     
     // Keyboard
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') closePanel();
         if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
             e.preventDefault();
-            $('#searchInput').focus();
+            $('#searchInput')?.focus();
         }
     });
     

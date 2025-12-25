@@ -7,8 +7,9 @@ Designed for deployment on Railway with PostgreSQL.
 
 import os
 import json
+from contextlib import contextmanager
 from datetime import datetime
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, g
 from flask_cors import CORS
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -27,18 +28,27 @@ CORS(app)
 db = None
 
 
-def get_db_session() -> Session:
-    """Get a database session."""
+def get_db():
+    """Get database instance (singleton)."""
     global db
     if db is None:
         db = get_database()
-    return db.get_session()
+    return db
+
+
+@contextmanager
+def get_db_session():
+    """Context manager for database sessions - ensures proper cleanup."""
+    session = get_db().get_session()
+    try:
+        yield session
+    finally:
+        session.close()
 
 
 def load_records():
     """Load all probate records merged with CRM data."""
-    session = get_db_session()
-    try:
+    with get_db_session() as session:
         # Get all probate records
         probate_records = session.query(ProbateRecord).all()
         
@@ -82,8 +92,6 @@ def load_records():
                 records.append(record)
         
         return records
-    finally:
-        session.close()
 
 
 @app.route('/')
@@ -109,15 +117,12 @@ def get_record(file_number):
         return jsonify({"error": "Record not found"}), 404
     
     # Get activities
-    session = get_db_session()
-    try:
+    with get_db_session() as session:
         activities = session.query(Activity)\
             .filter(Activity.file_number == file_number)\
             .order_by(Activity.created_at.desc())\
             .all()
         record['activities'] = [a.to_dict() for a in activities]
-    finally:
-        session.close()
     
     return jsonify(record)
 
@@ -127,8 +132,7 @@ def update_record(file_number):
     """Update CRM fields for a record."""
     data = request.json
     
-    session = get_db_session()
-    try:
+    with get_db_session() as session:
         # Check if CRM record exists
         crm_record = session.query(CRMRecord)\
             .filter(CRMRecord.file_number == file_number)\
@@ -162,8 +166,6 @@ def update_record(file_number):
             session.add(activity)
         
         session.commit()
-    finally:
-        session.close()
     
     return jsonify({"success": True})
 
@@ -171,15 +173,12 @@ def update_record(file_number):
 @app.route('/api/records/<path:file_number>/activities', methods=['GET'])
 def get_activities(file_number):
     """Get all activities for a record."""
-    session = get_db_session()
-    try:
+    with get_db_session() as session:
         activities = session.query(Activity)\
             .filter(Activity.file_number == file_number)\
             .order_by(Activity.created_at.desc())\
             .all()
         return jsonify([a.to_dict() for a in activities])
-    finally:
-        session.close()
 
 
 @app.route('/api/records/<path:file_number>/activities', methods=['POST'])
@@ -187,8 +186,7 @@ def add_activity(file_number):
     """Add a new activity/note to a record."""
     data = request.json
     
-    session = get_db_session()
-    try:
+    with get_db_session() as session:
         activity = Activity(
             file_number=file_number,
             activity_type=data.get('activity_type', 'note'),
@@ -200,8 +198,6 @@ def add_activity(file_number):
         # Refresh to get the generated ID
         session.refresh(activity)
         result = activity.to_dict()
-    finally:
-        session.close()
     
     return jsonify(result)
 
@@ -242,9 +238,8 @@ def get_stats():
 def health_check():
     """Health check endpoint for Railway."""
     try:
-        session = get_db_session()
-        session.execute(text("SELECT 1"))
-        session.close()
+        with get_db_session() as session:
+            session.execute(text("SELECT 1"))
         return jsonify({"status": "healthy", "database": "connected"})
     except Exception as e:
         return jsonify({"status": "unhealthy", "error": str(e)}), 500
