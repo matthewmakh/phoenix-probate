@@ -69,7 +69,7 @@ from google.auth.transport.requests import Request
 # =========================
 # Config (edit as needed)
 # =========================
-COURT_VALUE = "24"          # Queens County = 41
+COURT_VALUE = "3"          # Queens County = 41
 # Single switch for the target document type. Options: "PROBATE", "VOLUNTARY"
 #SELECTED_DOC = "PROBATE"  # Change to "VOLUNTARY" to target Voluntary Admin Affidavit
 SELECTED_DOC = "VOLUNTARY"  # Change to "VOLUNTARY" to target Voluntary Admin Affidavit
