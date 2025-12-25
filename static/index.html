@@ -108,8 +108,27 @@
                     <input type="text" id="searchInput" placeholder="Search records...">
                 </div>
                 <div class="topbar-actions">
+                    <select id="statusFilter" class="filter-select">
+                        <option value="">All Statuses</option>
+                        <option value="new">New</option>
+                        <option value="contacted">Contacted</option>
+                        <option value="qualified">Qualified</option>
+                        <option value="not-interested">Not Interested</option>
+                        <option value="closed">Closed</option>
+                    </select>
                     <select id="countyFilter" class="filter-select">
                         <option value="">All Counties</option>
+                    </select>
+                    <select id="relationshipFilter" class="filter-select">
+                        <option value="">All Relationships</option>
+                    </select>
+                    <select id="estateValueFilter" class="filter-select">
+                        <option value="">Any Estate Value</option>
+                        <option value="under10k">Under $10K</option>
+                        <option value="10k-30k">$10K - $30K</option>
+                        <option value="30k-50k">$30K - $50K</option>
+                        <option value="over50k">Over $50K</option>
+                        <option value="hasValue">Has Value</option>
                     </select>
                     <label class="toggle-label">
                         <input type="checkbox" id="hideApartments">

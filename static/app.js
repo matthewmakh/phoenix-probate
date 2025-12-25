@@ -55,6 +55,7 @@ async function loadRecords() {
         
         allRecords = await response.json();
         populateCountyFilter();
+        populateRelationshipFilter();
         applyFilters();
         updateStats();
         
@@ -98,6 +99,34 @@ function populateCountyFilter() {
     select.innerHTML = '<option value="">All Counties</option>';
     counties.forEach(c => {
         select.innerHTML += `<option value="${c}">${c}</option>`;
+    });
+}
+
+function populateRelationshipFilter() {
+    // Get unique relationships, normalize case for grouping
+    const relationshipMap = new Map();
+    allRecords.forEach(r => {
+        if (r.executor_relationship) {
+            const rel = r.executor_relationship.trim();
+            const key = rel.toLowerCase();
+            // Keep the most common casing
+            if (!relationshipMap.has(key)) {
+                relationshipMap.set(key, { display: rel, count: 1 });
+            } else {
+                relationshipMap.get(key).count++;
+            }
+        }
+    });
+    
+    // Sort by count descending
+    const relationships = [...relationshipMap.entries()]
+        .sort((a, b) => b[1].count - a[1].count)
+        .map(([key, val]) => val.display);
+    
+    const select = $('#relationshipFilter');
+    select.innerHTML = '<option value="">All Relationships</option>';
+    relationships.forEach(r => {
+        select.innerHTML += `<option value="${r.toLowerCase()}">${r}</option>`;
     });
 }
 
@@ -188,10 +217,13 @@ function updateStatusChart() {
 function applyFilters() {
     const search = $('#searchInput').value.toLowerCase().trim();
     const county = $('#countyFilter').value;
+    const status = $('#statusFilter').value;
+    const relationship = $('#relationshipFilter').value;
+    const estateValue = $('#estateValueFilter').value;
     const hideApts = $('#hideApartments').checked;
     
     filteredRecords = allRecords.filter(r => {
-        // View filter
+        // View filter (sidebar navigation)
         if (currentView === 'new' && r.status !== 'new') return false;
         if (currentView === 'contacted' && r.status !== 'contacted') return false;
         if (currentView === 'follow-up') {
@@ -199,8 +231,27 @@ function applyFilters() {
             if (!r.follow_up_date || r.follow_up_date > today) return false;
         }
         
+        // Status dropdown filter
+        if (status && r.status !== status) return false;
+        
         // County filter
         if (county && r.county !== county) return false;
+        
+        // Relationship filter
+        if (relationship) {
+            const recRel = (r.executor_relationship || '').toLowerCase();
+            if (recRel !== relationship) return false;
+        }
+        
+        // Estate value filter
+        if (estateValue) {
+            const val = parseFloat((r.estimated_estate_value || '').replace(/[^0-9.]/g, '')) || 0;
+            if (estateValue === 'hasValue' && val <= 0) return false;
+            if (estateValue === 'under10k' && (val <= 0 || val >= 10000)) return false;
+            if (estateValue === '10k-30k' && (val < 10000 || val >= 30000)) return false;
+            if (estateValue === '30k-50k' && (val < 30000 || val >= 50000)) return false;
+            if (estateValue === 'over50k' && val < 50000) return false;
+        }
         
         // Search filter
         if (search) {
@@ -548,6 +599,9 @@ function setupEventListeners() {
     
     // Filters
     $('#countyFilter').addEventListener('change', applyFilters);
+    $('#statusFilter').addEventListener('change', applyFilters);
+    $('#relationshipFilter').addEventListener('change', applyFilters);
+    $('#estateValueFilter').addEventListener('change', applyFilters);
     $('#hideApartments').addEventListener('change', applyFilters);
     
     // Refresh
