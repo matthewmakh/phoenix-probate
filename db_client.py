@@ -62,6 +62,16 @@ def add_file_number_to_cache(file_number: str):
     _existing_file_numbers.add(file_number.strip())
 
 
+def _normalize_value(val):
+    """Normalize a value for database storage - handle None, numbers, 'null' strings."""
+    if val is None:
+        return ""
+    if isinstance(val, (int, float)):
+        return str(int(val)) if isinstance(val, float) and val.is_integer() else str(val)
+    val_str = str(val).strip()
+    return "" if val_str.lower() == "null" else val_str
+
+
 def save_record_to_db(
     county_name: str,
     site_file_number: str,
@@ -102,6 +112,11 @@ def save_record_to_db(
             existing.executor_phone = llm_data.get("Executor/administrator phone") or existing.executor_phone
             existing.executor_address = llm_data.get("Executor/administrator address") or existing.executor_address
             existing.executor_email = llm_data.get("Executor/administrator email") or existing.executor_email
+            # Use normalize for fields that might have edge cases
+            rel_val = _normalize_value(llm_data.get("Executor/administrator relationship"))
+            est_val = _normalize_value(llm_data.get("Estimated estate value"))
+            existing.executor_relationship = rel_val or existing.executor_relationship
+            existing.estimated_estate_value = est_val or existing.estimated_estate_value
             existing.updated_at = datetime.utcnow()
             print(f"[DB] Updated record for {file_number}")
         else:
@@ -116,6 +131,8 @@ def save_record_to_db(
                 executor_phone=llm_data.get("Executor/administrator phone") or "",
                 executor_address=llm_data.get("Executor/administrator address") or "",
                 executor_email=llm_data.get("Executor/administrator email") or "",
+                executor_relationship=_normalize_value(llm_data.get("Executor/administrator relationship")),
+                estimated_estate_value=_normalize_value(llm_data.get("Estimated estate value")),
             )
             session.add(record)
             print(f"[DB] Created new record for {file_number}")

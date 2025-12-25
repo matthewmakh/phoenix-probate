@@ -59,6 +59,8 @@ def load_records():
                 "executor_phone": pr.executor_phone or "",
                 "executor_address": pr.executor_address or "",
                 "executor_email": pr.executor_email or "",
+                "executor_relationship": getattr(pr, 'executor_relationship', '') or "",
+                "estimated_estate_value": getattr(pr, 'estimated_estate_value', '') or "",
                 # CRM fields with defaults
                 "status": "new",
                 "follow_up_date": None,

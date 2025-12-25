@@ -380,6 +380,10 @@ function openPanel(index) {
                     <span class="detail-label">File #</span>
                     <span class="detail-value">${esc(currentRecord.file_number) || '—'}</span>
                 </div>
+                <div class="detail-row">
+                    <span class="detail-label">Est. Estate Value</span>
+                    <span class="detail-value estate-value">${esc(currentRecord.estimated_estate_value) || '—'}</span>
+                </div>
             </div>
         </div>
         
@@ -389,6 +393,10 @@ function openPanel(index) {
                 <div class="detail-row">
                     <span class="detail-label">Name</span>
                     <span class="detail-value">${esc(currentRecord.executor_name) || '—'}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Relationship</span>
+                    <span class="detail-value">${esc(currentRecord.executor_relationship) || '—'}</span>
                 </div>
                 <div class="detail-row">
                     <span class="detail-label">Phone</span>

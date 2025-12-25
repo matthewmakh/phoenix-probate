@@ -27,6 +27,8 @@ class ProbateRecord(Base):
     executor_phone = Column(String(50))
     executor_address = Column(Text)
     executor_email = Column(String(255))
+    executor_relationship = Column(String(100))  # e.g., "son", "spouse", "daughter"
+    estimated_estate_value = Column(String(50))  # e.g., "$50,000" or "50000"
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -47,6 +49,8 @@ class ProbateRecord(Base):
             'executor_phone': self.executor_phone or '',
             'executor_address': self.executor_address or '',
             'executor_email': self.executor_email or '',
+            'executor_relationship': self.executor_relationship or '',
+            'estimated_estate_value': self.estimated_estate_value or '',
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

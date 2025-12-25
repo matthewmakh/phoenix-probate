@@ -53,14 +53,15 @@ def _get_openai_client():
 	"""Construct OpenAI client using environment.
 
 	Prefers official OpenAI; honors OPENAI_BASE_URL if set (e.g., proxy or Azure-compatible gateway).
+	Includes a 30-second timeout to prevent hanging on slow API calls.
 	"""
 	_ensure_env()
 	from openai import OpenAI
 
 	base_url = os.getenv("OPENAI_BASE_URL") or None
 	if base_url:
-		return OpenAI(base_url=base_url)
-	return OpenAI()
+		return OpenAI(base_url=base_url, timeout=30.0)
+	return OpenAI(timeout=30.0)
 
 
 def _default_model() -> str:
@@ -79,6 +80,7 @@ FIELDS = [
 	"Executor/administrator phone",
 	"Executor/administrator address",
 	"Executor/administrator email",
+	"Estimated estate value",
 ]
 
 
@@ -92,6 +94,14 @@ SYSTEM_PROMPT = (
 	"- If you see 'Name of Vol. Adm.' or 'Voluntary Administrator', that is the EXECUTOR/ADMINISTRATOR, NOT the decedent\n"
 	"- The address next to 'Name and Address' or 'Vol. Adm.' is usually the EXECUTOR/ADMINISTRATOR address\n"
 	"- The 'Decedent address' is often NOT shown on page 1 of Voluntary Admin forms - return null if not found\n"
+	"- The 'Executor/administrator relationship' is found near 'My interest is:' or '(Relationship)' - common values: son, daughter, spouse, sibling, niece, nephew, grandchild\n"
+	"\n"
+	"ESTATE VALUE EXTRACTION:\n"
+	"- Look for dollar amounts next to banks, institutions, or 'release decedent's funds' lines\n"
+	"- Also check for 'Permission to open an estate acct in NY for no more than $X' - this is often the total\n"
+	"- Sum all dollar amounts you find to calculate 'Estimated estate value'\n"
+	"- Format as a number without $ sign (e.g., '25500' not '$25,500')\n"
+	"- If no dollar amounts are found, return null\n"
 	"\n"
 	"Normalize dates to YYYY-MM-DD when possible. Phone numbers should be US formatted like (212) 555-1234 when possible. "
 	"Addresses can be returned as a single line if multiple lines are present. Avoid hallucinating; prefer null over guessing. "
@@ -151,11 +161,20 @@ def extract_structured_fields(raw_text: str, *, model: Optional[str] = None, max
 			# Ensure all keys present; fill missing with None
 			for k in FIELDS:
 				data.setdefault(k, None)
-			# Trim whitespace strings; empty -> None
+			# Normalize values: trim strings, convert numbers to strings, empty -> None
 			for k, v in list(data.items()):
-				if isinstance(v, str):
+				if v is None:
+					continue
+				if isinstance(v, (int, float)):
+					# Convert numbers to strings (especially for estate value)
+					data[k] = str(int(v)) if isinstance(v, float) and v.is_integer() else str(v)
+				elif isinstance(v, str):
 					vv = v.strip()
-					data[k] = vv if vv else None
+					# Handle "null" string from LLM
+					data[k] = None if (not vv or vv.lower() == "null") else vv
+				else:
+					# Convert other types to string
+					data[k] = str(v)
 			return data
 		except Exception as e:  # parse errors / API errors
 			last_err = e
