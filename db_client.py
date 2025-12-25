@@ -72,6 +72,62 @@ def _normalize_value(val):
     return "" if val_str.lower() == "null" else val_str
 
 
+# Canonical relationship names mapping
+RELATIONSHIP_MAPPING = {
+    # Spouse variants
+    'spouse': 'Spouse',
+    'spause': 'Spouse',  # typo
+    'wife': 'Spouse',
+    'husband': 'Spouse',
+    'surviving spouse': 'Spouse',
+    # Children
+    'son': 'Son',
+    'daughter': 'Daughter',
+    'child': 'Child',
+    'children': 'Child',
+    # Parents
+    'mother': 'Mother',
+    'father': 'Father',
+    'parent': 'Parent',
+    # Siblings
+    'brother': 'Brother',
+    'sister': 'Sister',
+    'sibling': 'Sibling',
+    # Extended family
+    'grandchild': 'Grandchild',
+    'grandson': 'Grandchild',
+    'granddaughter': 'Grandchild',
+    'niece': 'Niece/Nephew',
+    'nephew': 'Niece/Nephew',
+    'uncle': 'Uncle/Aunt',
+    'aunt': 'Uncle/Aunt',
+    'cousin': 'Cousin',
+    # Legal terms
+    'distributee': 'Distributee',
+    'distributee of decedent': 'Distributee',
+    'issue': 'Distributee',
+}
+
+
+def normalize_relationship(rel):
+    """Normalize relationship to canonical form."""
+    if not rel:
+        return ""
+    rel_clean = rel.strip().lower()
+    
+    # Check direct mapping
+    if rel_clean in RELATIONSHIP_MAPPING:
+        return RELATIONSHIP_MAPPING[rel_clean]
+    
+    # Check if any key is contained in the value (for compound values)
+    for key, canonical in RELATIONSHIP_MAPPING.items():
+        if key in rel_clean:
+            return canonical
+    
+    # Title case if no mapping found
+    return rel.strip().title()
+
+
 def save_record_to_db(
     county_name: str,
     site_file_number: str,
@@ -112,15 +168,17 @@ def save_record_to_db(
             existing.executor_phone = llm_data.get("Executor/administrator phone") or existing.executor_phone
             existing.executor_address = llm_data.get("Executor/administrator address") or existing.executor_address
             existing.executor_email = llm_data.get("Executor/administrator email") or existing.executor_email
-            # Use normalize for fields that might have edge cases
-            rel_val = _normalize_value(llm_data.get("Executor/administrator relationship"))
+            # Normalize relationship and estate value
+            rel_raw = _normalize_value(llm_data.get("Executor/administrator relationship"))
+            rel_val = normalize_relationship(rel_raw) if rel_raw else ""
             est_val = _normalize_value(llm_data.get("Estimated estate value"))
             existing.executor_relationship = rel_val or existing.executor_relationship
             existing.estimated_estate_value = est_val or existing.estimated_estate_value
             existing.updated_at = datetime.utcnow()
             print(f"[DB] Updated record for {file_number}")
         else:
-            # Create new record
+            # Create new record - normalize relationship
+            rel_raw = _normalize_value(llm_data.get("Executor/administrator relationship"))
             record = ProbateRecord(
                 county=county_name or llm_data.get("County") or "",
                 file_number=file_number,
@@ -131,7 +189,7 @@ def save_record_to_db(
                 executor_phone=llm_data.get("Executor/administrator phone") or "",
                 executor_address=llm_data.get("Executor/administrator address") or "",
                 executor_email=llm_data.get("Executor/administrator email") or "",
-                executor_relationship=_normalize_value(llm_data.get("Executor/administrator relationship")),
+                executor_relationship=normalize_relationship(rel_raw) if rel_raw else "",
                 estimated_estate_value=_normalize_value(llm_data.get("Estimated estate value")),
             )
             session.add(record)
