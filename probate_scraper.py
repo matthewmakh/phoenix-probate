@@ -66,10 +66,10 @@ from google.auth.transport.requests import Request
 # =========================
 # Config (edit as needed)
 # =========================
-COURT_VALUE = "41"          # Queens County = 41
+COURT_VALUE = os.environ.get("PB_COURT_VALUE", "41")  # Queens County = 41
 # Single switch for the target document type. Options: "PROBATE", "VOLUNTARY"
-#SELECTED_DOC = "PROBATE"  # Change to "VOLUNTARY" to target Voluntary Admin Affidavit
-SELECTED_DOC = "VOLUNTARY"  # Change to "VOLUNTARY" to target Voluntary Admin Affidavit
+# Overridable from the control panel / environment (PB_SELECTED_DOC = "PROBATE" or "VOLUNTARY")
+SELECTED_DOC = os.environ.get("PB_SELECTED_DOC", "VOLUNTARY").upper()
 
 # Central mapping for proceeding dropdown text, document row match, and filename suffix
 DOC_OPTIONS = {
@@ -88,28 +88,32 @@ DOC_OPTIONS = {
 
 # Derived proceeding text for the search form from the selection above
 PROCEEDING_TEXT = DOC_OPTIONS[SELECTED_DOC]["proceeding"]
-DATE_FROM = "11/01/2025"
-DATE_TO   = "11/30/2025"
+DATE_FROM = os.environ.get("PB_DATE_FROM", "11/01/2025")
+DATE_TO   = os.environ.get("PB_DATE_TO", "11/30/2025")
 
 # Pagination controls: set to 0 to disable pagination, or specify pages to skip (comma-separated)
 # Examples:
 #   PAGINATION_ENABLED = True  # process all pages
 #   SKIP_PAGES = "1,3"         # skip pages 1 and 3
 #   SKIP_PAGES = ""            # don't skip any pages
-PAGINATION_ENABLED = True
-SKIP_PAGES = ""  # comma-separated page numbers to skip, e.g. "1,3,5"
+PAGINATION_ENABLED = os.environ.get("PB_PAGINATION_ENABLED", "1") not in ("0", "false", "False", "")
+SKIP_PAGES = os.environ.get("PB_SKIP_PAGES", "")  # comma-separated page numbers to skip, e.g. "1,3,5"
 
 # CSV skip configuration: skip cases if file number already exists in CSV
 SKIP_EXISTING_IN_CSV = True
-CSV_PATH = os.path.join(os.path.dirname(__file__), "data", "probate_records.csv")
+CSV_PATH = os.environ.get(
+    "PB_CSV_PATH", os.path.join(os.path.dirname(__file__), "data", "probate_records.csv")
+)
 
-DEBUG_ADDRESS = "127.0.0.1:9222"
+DEBUG_ADDRESS = os.environ.get("PB_DEBUG_ADDRESS", "127.0.0.1:9222")
 WAIT_SEC = 30
 LIST_WAIT_SEC = 20
 KEEP_BROWSER_OPEN = True
 
 # Dedicated folder to avoid mixing with other PDFs
-DOWNLOAD_DIR = os.path.join(os.path.expanduser("~/Downloads"), "ny-probate")
+DOWNLOAD_DIR = os.environ.get(
+    "PB_DOWNLOAD_DIR", os.path.join(os.path.expanduser("~/Downloads"), "ny-probate")
+)
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # Slow-and-steady pacing between cases to reduce bursts against Azure
@@ -590,9 +594,9 @@ def process_downloaded_pdf(final_path: str, site_file_number: Optional[str] = No
         log("⚠️ LLM extraction returned no data")
         return False
 
-    # Prepare CSV row
-    CSV_PATH = os.path.join("data", "probate_records.csv")
-    os.makedirs("data", exist_ok=True)
+    # Prepare CSV row. Use the absolute, module-level CSV_PATH so records always land
+    # in the same file no matter which directory the app was launched from.
+    os.makedirs(os.path.dirname(CSV_PATH), exist_ok=True)
     columns = [
         "County",
         "File number",

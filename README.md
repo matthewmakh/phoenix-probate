@@ -1,5 +1,13 @@
 # NY Surrogate Court Probate Scraper
 
+> **📦 Want to send this to someone to run on their own Mac?**
+> See **[DISTRIBUTION.md](DISTRIBUTION.md)** — one command builds a sendable
+> `.dmg` with a double-click launcher and a no-code control panel. The
+> recipient's quick-start is **[SETUP.md](SETUP.md)**.
+>
+> **🖥️ Just want the app locally?** Double-click **`Launch Phoenix
+> Probate.command`** (or run `streamlit run control_panel.py`).
+
 This script automates searching the NY Surrogate Court site after you manually solve the captcha, then downloads the "Probate Petition" PDF for each case and uploads it to Google Drive.
 
 ## What it does

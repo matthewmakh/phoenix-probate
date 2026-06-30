@@ -56,6 +56,10 @@ structured_json/
 # Cache
 .cache/
 *.log
+logs/
+
+# Build environments / artifacts
+.build-venv/
 
 # Temporary files
 summary.json
