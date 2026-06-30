@@ -47,7 +47,21 @@ rsync -a \
   "$ROOT/" "$APP_FOLDER/"
 
 # Decide which config file ships.
-if [ "$BUNDLE_KEYS" = "1" ] && [ -f "$ROOT/.env" ]; then
+if [ "$BUNDLE_KEYS" = "1" ]; then
+  if [ ! -f "$ROOT/.env" ]; then
+    echo "ERROR: No .env file found, so there are no keys to bundle." >&2
+    echo "  Run:  cp .env.example .env   then edit .env and add your keys." >&2
+    echo "  (Or build without keys:  bash dist_tools/make_dmg.sh --no-keys )" >&2
+    exit 1
+  fi
+  # Refuse to ship a .env that still has placeholder values like AZ_KEY=<your-azure-key>.
+  if grep -Eq '=[[:space:]]*<' "$ROOT/.env"; then
+    echo "ERROR: .env still contains placeholder values (e.g. <your-azure-key>)." >&2
+    echo "  Open it and paste your real keys, then run this again:" >&2
+    echo "      open -e \"$ROOT/.env\"" >&2
+    echo "  (Or build without keys:  bash dist_tools/make_dmg.sh --no-keys )" >&2
+    exit 1
+  fi
   echo "==> Bundling your API keys from .env (recipient needs no setup)."
   cp "$ROOT/.env" "$APP_FOLDER/.env"
 else
