@@ -35,21 +35,44 @@ if ! touch "$APP_DIR/.perm_test" 2>/dev/null; then
 fi
 rm -f "$APP_DIR/.perm_test"
 
-# --- 1. Make sure Python 3 is available -----------------------------------
-if ! command -v python3 >/dev/null 2>&1; then
+# --- 1. Find a suitable Python 3 -------------------------------------------
+# Prefer versions with broad prebuilt-wheel support. A brand-new release
+# (e.g. 3.14) often can't install pandas/streamlit yet, and its pip bootstrap
+# may be missing — so only fall back to a bare "python3" as a last resort.
+PYCHOICE=""
+for cand in python3.12 python3.11 python3.13 python3.10 python3; do
+  if command -v "$cand" >/dev/null 2>&1; then
+    PYCHOICE="$(command -v "$cand")"
+    break
+  fi
+done
+
+if [ -z "$PYCHOICE" ]; then
   warn "Python 3 is required but was not found."
   echo "A macOS dialog may appear to install the Command Line Tools — please"
   echo "click Install, wait for it to finish, then run this launcher again."
   xcode-select --install >/dev/null 2>&1 || true
-  echo "If no dialog appears, download Python from https://www.python.org/downloads/macos/"
+  echo "If no dialog appears, install Python 3.12 from:"
+  echo "   https://www.python.org/downloads/release/python-3128/"
   read -r -p "Press Return to close." _ || true
   exit 1
 fi
+say "Using $("$PYCHOICE" --version 2>&1) at $PYCHOICE"
 
 # --- 2. Create the isolated environment on first run ----------------------
 if [ ! -x "$PYBIN" ]; then
   say "First-time setup: creating a private Python environment (one minute)…"
-  python3 -m venv "$VENV"
+  if ! "$PYCHOICE" -m venv "$VENV" 2>/tmp/pp_venv_err; then
+    warn "Could not create the environment with $("$PYCHOICE" --version 2>&1)."
+    sed 's/^/   /' /tmp/pp_venv_err 2>/dev/null || true
+    echo
+    echo "This usually means that Python version is too new (missing pip support)."
+    echo "Please install Python 3.12 from:"
+    echo "   https://www.python.org/downloads/release/python-3128/"
+    echo "then double-click this launcher again."
+    read -r -p "Press Return to close." _ || true
+    exit 1
+  fi
 fi
 
 # --- 3. Install / update dependencies only when requirements change --------
