@@ -22,6 +22,19 @@ warn() { printf "\n\033[1;33m%s\033[0m\n" "$*"; }
 
 say "Phoenix Probate — starting up…"
 
+# --- 0. Refuse to run from a read-only spot (e.g. inside the mounted DMG) ---
+if ! touch "$APP_DIR/.perm_test" 2>/dev/null; then
+  warn "This app is running from a read-only location, so it can't set itself up here."
+  echo "You're probably running it straight from the disk image (a /Volumes path)."
+  echo
+  echo "Fix: drag the \"Phoenix Probate\" folder to your Applications or Desktop"
+  echo "folder, then open it from there and double-click this launcher again."
+  echo
+  read -r -p "Press Return to close." _ || true
+  exit 1
+fi
+rm -f "$APP_DIR/.perm_test"
+
 # --- 1. Make sure Python 3 is available -----------------------------------
 if ! command -v python3 >/dev/null 2>&1; then
   warn "Python 3 is required but was not found."
