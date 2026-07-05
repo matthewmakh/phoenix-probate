@@ -218,12 +218,10 @@ def selected_county_name() -> str:
 def attach_driver(debug_address: str = DEBUG_ADDRESS):
     opts = Options()
     opts.add_experimental_option("debuggerAddress", debug_address)
-    opts.add_experimental_option("prefs", {
-        "download.default_directory": DOWNLOAD_DIR,
-        "download.prompt_for_download": False,
-        "download.directory_upgrade": True,
-        "plugins.always_open_pdf_externally": True
-    })
+    # When attaching to an already-running Chrome (debuggerAddress), the browser
+    # is already launched, so launch-time options like "prefs" are rejected by
+    # newer ChromeDriver ("unrecognized chrome option: prefs"). The download
+    # folder is set at runtime via CDP (Page.setDownloadBehavior) just below.
     driver = webdriver.Chrome(options=opts)
     wait = WebDriverWait(driver, WAIT_SEC)
     # Ensure downloads are allowed to our folder even when attaching to an existing Chrome
@@ -830,7 +828,14 @@ def scrape_current_page(driver, wait, root):
 # Main
 # =========================
 def main():
-    driver, wait = attach_driver()
+    try:
+        driver, wait = attach_driver()
+    except Exception as e:
+        log(f"[x] Could not connect to Chrome: {e}")
+        log("[i] Make sure you clicked 'Open Chrome & log in' in the app and "
+            "finished logging in (solve the captcha, then click into File Search), "
+            "then start scraping again.")
+        return
 
     # Load existing CSV records for skip checking
     if SKIP_EXISTING_IN_CSV:
