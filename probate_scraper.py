@@ -159,6 +159,21 @@ def human_sleep(a: float, b: float):
 def clean(txt: Optional[str]) -> str:
     return " ".join((txt or "").split())
 
+def safe_click(driver, element):
+    """Click robustly: scroll the element to the center of the viewport, try a
+    native click, and fall back to a JavaScript click if something overlays it.
+    This avoids the 'element click intercepted' error seen on newer Chrome when
+    a sticky header/banner covers the target."""
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+    except Exception:
+        pass
+    human_sleep(0.1, 0.25)
+    try:
+        element.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", element)
+
 # County mapping for known court values (extend as needed)
 COURT_TO_COUNTY = {
     "41": "Queens",
@@ -224,15 +239,15 @@ def attach_driver(debug_address: str = DEBUG_ADDRESS):
     # folder is set at runtime via CDP (Page.setDownloadBehavior) just below.
     driver = webdriver.Chrome(options=opts)
     wait = WebDriverWait(driver, WAIT_SEC)
-    # Ensure downloads are allowed to our folder even when attaching to an existing Chrome
-    try:
-        driver.execute_cdp_cmd("Page.setDownloadBehavior", {
-            "behavior": "allow",
-            "downloadPath": DOWNLOAD_DIR
-        })
-    except Exception:
-        # Not fatal; some driver versions gate this differently
-        pass
+    # Ensure downloads are allowed to our folder even when attaching to an existing
+    # Chrome. Try the browser-wide command first (more reliable on newer Chrome),
+    # then the per-page one; both are best-effort.
+    for _cmd in ("Browser.setDownloadBehavior", "Page.setDownloadBehavior"):
+        try:
+            driver.execute_cdp_cmd(_cmd, {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
+        except Exception:
+            # Not fatal; some driver versions gate these differently
+            pass
     return driver, wait
 
 # =========================
@@ -738,7 +753,7 @@ def scrape_case(driver, root, idx, row):
                         probate_btn = r.find_element(By.CSS_SELECTOR, "button.ButtonAsLink")
                         # Ensure clickable before clicking to avoid intercept issues
                         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(probate_btn))
-                        probate_btn.click()
+                        safe_click(driver, probate_btn)
                         human_sleep(0.15, 0.35)
                         target_found = True
                         log(f"📥 {DOC_OPTIONS[SELECTED_DOC]['filename']} download triggered for {file_number}")
@@ -871,7 +886,7 @@ def main():
         human_sleep(0.15, 0.35)
 
         log("[4] Submitting search")
-        driver.find_element(By.ID, "FileSearchSubmit2").click()
+        safe_click(driver, driver.find_element(By.ID, "FileSearchSubmit2"))
         human_sleep(0.15, 0.35)
 
         root = driver.current_window_handle
