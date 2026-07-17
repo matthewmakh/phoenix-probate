@@ -41,3 +41,7 @@ Open the **Records** tab any time to see results and download the spreadsheet.
 - To stop, click **Stop** in the app, or just close the Terminal window.
 - If the app says a key is missing, ask the person who sent it to you for the
   Azure and OpenAI keys, then paste them into the sidebar and click **Save**.
+- If a case's PDF opens in its own tab instead of downloading: in that Chrome
+  window, open a new tab, go to `chrome://settings/content/pdfDocuments`, and
+  turn on **"Download PDFs instead of automatically opening them in Chrome."**
+  One-time fix — it stays on after that.

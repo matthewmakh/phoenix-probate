@@ -136,6 +136,42 @@ def debug_chrome_is_up(host: str = DEBUG_HOST, port: int = DEBUG_PORT) -> bool:
         return s.connect_ex((host, port)) == 0
 
 
+def _seed_pdf_download_pref(user_dir: str) -> None:
+    """Configure the dedicated debug-Chrome profile to download PDFs instead of
+    opening them in Chrome's built-in viewer tab, so the scraper's file-watch
+    download logic actually sees a file land in DOWNLOAD_DIR.
+
+    Selenium can't set this via launch-time "prefs" when *attaching* to an
+    existing browser (Chrome rejects it), so instead we edit the profile's own
+    Preferences file on disk before Chrome starts. Only called when this
+    profile's Chrome isn't currently running, so our edit can't be silently
+    overwritten when that process later exits and flushes its own copy.
+    """
+    import json
+
+    default_dir = os.path.join(user_dir, "Default")
+    os.makedirs(default_dir, exist_ok=True)
+    prefs_path = os.path.join(default_dir, "Preferences")
+
+    data = {}
+    if os.path.exists(prefs_path):
+        try:
+            with open(prefs_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}  # corrupt/partial file — safest is to just add our keys fresh
+
+    data.setdefault("plugins", {})["always_open_pdf_externally"] = True
+    dl = data.setdefault("download", {})
+    dl["prompt_for_download"] = False
+
+    try:
+        with open(prefs_path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception:
+        pass  # best-effort; the in-app Chrome setting remains a manual fallback
+
+
 def launch_debug_chrome() -> tuple[bool, str]:
     chrome = find_chrome()
     if not chrome:
@@ -145,6 +181,8 @@ def launch_debug_chrome() -> tuple[bool, str]:
         )
     user_dir = os.path.expanduser("~/chrome-remote")
     os.makedirs(user_dir, exist_ok=True)
+    if not debug_chrome_is_up():
+        _seed_pdf_download_pref(user_dir)
     try:
         subprocess.Popen(
             [
@@ -393,6 +431,11 @@ def render_help_tab() -> None:
 - A case already in the spreadsheet is skipped, so re-running is safe.
 - If Step 1 says Chrome isn't connected, make sure you opened it with the
   button here (not a normal Chrome window) and that you didn't close it.
+- If a case's PDF opens in its own Chrome tab instead of downloading, that
+  Chrome profile has "open PDFs in Chrome" turned on. Fix it once: in that
+  Chrome window, open a new tab, go to `chrome://settings/content/pdfDocuments`,
+  and turn on **"Download PDFs instead of automatically opening them in
+  Chrome."** It stays fixed after that.
 - The login page is here if you need it directly: {AUTH_URL}
 """
     )
