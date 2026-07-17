@@ -687,6 +687,11 @@ def scrape_case(driver, root, idx, row):
         
         log(f"[{idx}] Opening file {file_num} in a new tab")
 
+        # Snapshot existing tabs so we can reliably detect the NEW one, even when
+        # the user already has other tabs open in this Chrome window (otherwise we
+        # might switch to — and later close — one of their existing tabs).
+        handles_before = set(driver.window_handles)
+
         # Open result in NEW TAB by posting current form data with the row's button value
         driver.execute_script("""
             (function(btn){
@@ -715,8 +720,15 @@ def scrape_case(driver, root, idx, row):
         """, btn)
         # Tiny pause helps page script events settle
         human_sleep(0.15, 0.35)
-        WebDriverWait(driver, 10).until(lambda d: len(d.window_handles) > 1)
-        new_tab = [h for h in driver.window_handles if h != root][-1]
+        try:
+            WebDriverWait(driver, 15).until(
+                lambda d: len(set(d.window_handles) - handles_before) >= 1
+            )
+        except Exception:
+            log(f"[{idx}] ⚠️ The case tab did not open (popup blocked?) — skipping this one.")
+            return
+        new_handles = [h for h in driver.window_handles if h not in handles_before]
+        new_tab = new_handles[-1]
         driver.switch_to.window(new_tab)
 
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
@@ -773,7 +785,7 @@ def scrape_case(driver, root, idx, row):
         human_sleep(0.4, 0.8)
 
     except Exception as e:
-        log(f"⚠️ Row {idx} failed: {e}")
+        log(f"⚠️ Row {idx} failed: {type(e).__name__}: {e}")
         try:
             if driver.current_window_handle != root:
                 driver.close()
@@ -793,8 +805,8 @@ def get_pagination_links(driver) -> list:
     Store the element reference so we can click it later.
     """
     try:
-        # XPath: /html/body/div[1]/div[5]/div/div/form/div[3]/div[2]/ul
-        ul = driver.find_element(By.XPATH, "/html/body/div[1]/div[5]/div/div/form/div[3]/div[2]/ul")
+        # Bootstrap pagination list (robust to layout changes vs. an absolute XPath)
+        ul = driver.find_element(By.CSS_SELECTOR, "ul.pagination")
         page_items = ul.find_elements(By.CSS_SELECTOR, "li.page-item a.page-link")
         pages = []
         for item in page_items:
@@ -953,7 +965,7 @@ def main():
                             
                             # Find and click the pagination link for this page
                             # We need to find it fresh each time since the DOM may have changed
-                            ul = driver.find_element(By.XPATH, "/html/body/div[1]/div[5]/div/div/form/div[3]/div[2]/ul")
+                            ul = driver.find_element(By.CSS_SELECTOR, "ul.pagination")
                             
                             # Scroll to pagination area first
                             log(f"[pagination] Scrolling to pagination area")
@@ -1011,7 +1023,7 @@ def main():
                                     log(f"[pagination] Page mismatch! Attempting second click to page {page_num}")
                                     
                                     # Find and click the target page again
-                                    ul = driver.find_element(By.XPATH, "/html/body/div[1]/div[5]/div/div/form/div[3]/div[2]/ul")
+                                    ul = driver.find_element(By.CSS_SELECTOR, "ul.pagination")
                                     page_links = ul.find_elements(By.CSS_SELECTOR, "li.page-item a.page-link")
                                     
                                     for link in page_links:
